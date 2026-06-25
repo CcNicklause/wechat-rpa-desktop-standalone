@@ -372,8 +372,39 @@ class _Win32WindowProxy:
         import ctypes
 
         user32 = ctypes.windll.user32
-        user32.ShowWindow(self.NativeWindowHandle, 9)  # SW_RESTORE
-        user32.SetForegroundWindow(self.NativeWindowHandle)
+        kernel32 = ctypes.windll.kernel32
+        hwnd = self.NativeWindowHandle
+
+        # 1. 恢复并显示窗口（如果最小化了就 SW_RESTORE=9，否则 SW_SHOW=5）
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)
+        else:
+            user32.ShowWindow(hwnd, 5)
+
+        # 2. 绕过 Windows 的 SetForegroundWindow 限制
+        # 获取当前前台窗口的线程 ID
+        fore_hwnd = user32.GetForegroundWindow()
+        fore_thread = user32.GetWindowThreadProcessId(fore_hwnd, None)
+        curr_thread = kernel32.GetCurrentThreadId()
+
+        attached = False
+        if fore_hwnd != hwnd and fore_thread != 0 and fore_thread != curr_thread:
+            # 将当前线程的输入附加到当前前台窗口线程
+            attached = bool(user32.AttachThreadInput(curr_thread, fore_thread, True))
+
+        try:
+            # 临时将窗口设为置顶再恢复，以强行激活它
+            # HWND_TOPMOST = -1, HWND_NOTOPMOST = -2
+            # SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_SHOWWINDOW = 0x0040
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+            user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+        finally:
+            if attached:
+                # 分离线程输入
+                user32.AttachThreadInput(curr_thread, fore_thread, False)
 
     def SetTopmost(self, on: bool) -> None:
         import ctypes
