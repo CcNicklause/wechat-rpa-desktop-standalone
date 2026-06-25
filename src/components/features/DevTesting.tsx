@@ -1,0 +1,427 @@
+import { useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { requestLocalApi } from '@/lib/api';
+import { useToast } from '@/hooks/useToast';
+import { useDevTestStore } from '@/stores/useDevTestStore';
+import { JobProgress } from './JobProgress';
+
+const testSchema = z.object({
+  phone: z.string().min(5, '手机号或微信号格式不符合验证规则'),
+  greeting: z.string().min(1, '验证消息设置不能为空'),
+  dryRun: z.boolean(),
+});
+
+type TestFormValues = z.infer<typeof testSchema>;
+
+interface AuditEvent {
+  event_type: string;
+  timestamp: string;
+  lead_id?: string | null;
+  phone_masked?: string | null;
+  result?: string | null;
+  reason_code?: string | null;
+  message?: string | null;
+}
+
+const TEMPLATES = [
+  { title: '模板 1：默认销售加微', text: '您好，我是销售顾问，收到了您的微信申请。' },
+  { title: '模板 2：商务合作对接', text: '您好，我是 WeChat RPA 的对接人，想跟您进行商务合作。' },
+  { title: '模板 3：极简打招呼', text: '您好，麻烦通过一下，谢谢！' },
+];
+
+export function DevTesting() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // 所有跨刷新需要保留的状态都进了 zustand store + persist；本组件只读不存 useState，
+  // 这样即便表单意外触发原生提交导致整树重挂载，重新挂载后能立刻看到上次的 job/审计/表单值。
+  const testJobId = useDevTestStore((s) => s.testJobId);
+  const testLeadId = useDevTestStore((s) => s.testLeadId);
+  const jobFinished = useDevTestStore((s) => s.jobFinished);
+  const formDraft = useDevTestStore((s) => s.formDraft);
+  const startJobInStore = useDevTestStore((s) => s.startJob);
+  const markFinished = useDevTestStore((s) => s.markFinished);
+  const clearJobInStore = useDevTestStore((s) => s.clearJob);
+  const setFormDraft = useDevTestStore((s) => s.setFormDraft);
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    getValues,
+    formState: { errors, isSubmitting },
+  } = useForm<TestFormValues>({
+    resolver: zodResolver(testSchema),
+    defaultValues: formDraft,
+  });
+
+  const isDryRun = watch('dryRun');
+
+  // 用 watch 订阅整表，把每一次变化写回 store；这样刷新后 form 也能恢复用户输入。
+  useEffect(() => {
+    const sub = watch((value) => {
+      setFormDraft({
+        phone: value.phone ?? '',
+        greeting: value.greeting ?? '',
+        dryRun: value.dryRun ?? true,
+      });
+    });
+    return () => sub.unsubscribe();
+  }, [watch, setFormDraft]);
+
+  // 沿用老 frontend/app.js 的 refreshAudit 思路：按 lead_id 拉一段时间内的审计流，
+  // 并在前端按时间倒序展示卡片。8s 轮询足以覆盖整条加微链路的事件刷新节奏。
+  const auditQuery = useQuery<AuditEvent[]>({
+    queryKey: ['dev-test-audit', testLeadId],
+    enabled: !!testLeadId,
+    refetchInterval: 8000,
+    queryFn: () =>
+      requestLocalApi<AuditEvent[]>(
+        `/api/v1/audit?lead_id=${encodeURIComponent(testLeadId!)}&limit=200`,
+      ),
+  });
+
+  const handleSelectTemplate = (val: string) => {
+    setValue('greeting', val, { shouldDirty: true });
+    setFormDraft({ greeting: val });
+  };
+
+  const onSubmit = async (data: TestFormValues) => {
+    // 真实加微需要前端二次人工确认，再把 human_approval 透传给后端
+    if (!data.dryRun) {
+      const confirmed = window.confirm(
+        `⚠️ 即将执行【真实加微】操作\n\n目标：${data.phone}\n验证语：${data.greeting}\n\n后端会接管 Windows 引擎对微信客户端发送真实指令，是否确认继续？`,
+      );
+      if (!confirmed) {
+        toast({ title: '已取消', description: '用户取消了真实加微执行', variant: 'default' });
+        return;
+      }
+    }
+
+    try {
+      // 1. Create a dynamic test lead to satisfy backend validation
+      const lead = await requestLocalApi<any>('/api/v1/leads', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_name: '测试用户',
+          company: '测试开发公司',
+          phone: data.phone,
+          sales_id: 'sales_demo_001',
+        }),
+      });
+
+      // 1.5. Start call to transition lead state to CALLING
+      await requestLocalApi<any>(`/api/v1/leads/${lead.lead_id}/call-start`, {
+        method: 'POST',
+      });
+
+      // 2. Submit call summary to approve/consent lead
+      await requestLocalApi<any>(`/api/v1/leads/${lead.lead_id}/call-summary`, {
+        method: 'POST',
+        body: JSON.stringify({
+          intent: 'STRONG',
+          summary: '开发测试自动生成的通话总结',
+          customer_consent: true,
+          sales_confirmed_call: true,
+          consent_evidence: '手动测试线索自动授权同意',
+        }),
+      });
+
+      // 3. Trigger RPA task
+      // dry_run=false 必须同步把 human_approval 置 true，否则后端会以
+      // HUMAN_APPROVAL_REQUIRED 拒绝（rpa_orchestrator._validate_add_request）。
+      const response = await requestLocalApi<any>('/api/v1/rpa/add-wechat', {
+        method: 'POST',
+        body: JSON.stringify({
+          lead_id: lead.lead_id,
+          greeting: data.greeting,
+          dry_run: data.dryRun,
+          human_approval: !data.dryRun,
+        }),
+      });
+
+      if (response.job_id) {
+        // 一次性把 job_id / lead_id / 表单值写入 store，立刻持久到 localStorage
+        startJobInStore({
+          jobId: response.job_id,
+          leadId: lead.lead_id,
+          form: { phone: data.phone, greeting: data.greeting, dryRun: data.dryRun },
+        });
+        toast({
+          title: data.dryRun ? '模拟任务已启动' : '真实加微任务已下发',
+          description: data.dryRun
+            ? '模拟加微指令已进入队列，可在右侧查看步骤'
+            : '真实 RPA 指令已下发，请保持微信客户端可见',
+          variant: 'success',
+        });
+      }
+      // 立刻拉一次审计，避免等到下一次轮询窗口
+      queryClient.invalidateQueries({ queryKey: ['dev-test-audit', lead.lead_id] });
+    } catch (err: any) {
+      // 区分"后端没起来 / 网络不通"和"后端返回错误"两种情况，给开发更明确的提示
+      const message = err?.message || '';
+      const isNetworkDown =
+        err instanceof TypeError ||
+        /Failed to fetch|NetworkError|ECONNREFUSED|Connection refused/i.test(message);
+
+      if (isNetworkDown) {
+        toast({
+          title: '无法连接本地后端',
+          description: '127.0.0.1:8000 未响应，请确认 Python 后端已启动 (pnpm tauri dev 或手动 uvicorn)。',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: '执行测试失败',
+          description: message || '通信阻断或配置参数超限',
+          variant: 'destructive',
+        });
+      }
+    }
+  };
+
+  return (
+    <div className="flex-1 flex overflow-hidden p-6 gap-6">
+      <Card className="flex-[3] min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
+        <CardHeader className="p-0 pb-4 border-b border-border mb-4">
+          <CardTitle>手动加友功能测试面板</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 flex-1 flex flex-col justify-between">
+          <form
+            // 显式拦截原生提交，防止 Tauri webview 把表单 action="" 当作页面 reload，
+            // 导致 AppShell 整树重挂载、hash 路由被默认值覆盖到 #/dashboard。
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              // 把当前表单值同步写到 store，确保哪怕之后真出了 reload，重新挂载后
+              // form 默认值也是用户最后看到的那一份。
+              const v = getValues();
+              setFormDraft({ phone: v.phone, greeting: v.greeting, dryRun: v.dryRun });
+              void handleSubmit(onSubmit)(e);
+            }}
+            noValidate
+            className="space-y-4 text-xs"
+          >
+            <div className="space-y-1.5">
+              <label className="font-semibold text-muted-foreground">测试手机号 / 微信号</label>
+              <input
+                type="text"
+                {...register('phone')}
+                placeholder="请输入手机号或者微信号"
+                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+              />
+              {errors.phone && <p className="text-[10px] text-rose-500 font-semibold">{errors.phone.message}</p>}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-semibold text-muted-foreground">常用验证模板预设</label>
+              <select
+                onChange={(e) => handleSelectTemplate(e.target.value)}
+                className="w-full px-3 py-1.5 bg-background border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+              >
+                {TEMPLATES.map((t, idx) => (
+                  <option key={idx} value={t.text}>{t.title}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-semibold text-muted-foreground">验证语设置</label>
+              <textarea
+                {...register('greeting')}
+                rows={3}
+                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+              />
+              {errors.greeting && <p className="text-[10px] text-rose-500 font-semibold">{errors.greeting.message}</p>}
+            </div>
+
+            <div className="flex justify-between items-center border border-border p-3 bg-muted/20 rounded-xl">
+              <div className="space-y-0.5">
+                <span className="font-semibold text-foreground">Dry Run (模拟微信点击操作)</span>
+                <p className="text-[10px] text-muted-foreground">开启后仅展示模拟点击，关闭后将接管 Windows 引擎执行真实指令</p>
+              </div>
+              <Switch
+                checked={isDryRun}
+                onCheckedChange={(checked) => setValue('dryRun', checked, { shouldDirty: true })}
+              />
+            </div>
+
+            <Button
+              type="submit"
+              disabled={isSubmitting || (!!testJobId && !jobFinished)}
+              variant={isDryRun ? 'default' : 'destructive'}
+              className="w-full h-9"
+            >
+              {isDryRun ? '立即执行模拟加友测试' : '⚠️ 立即执行真实加微（需确认）'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <div className="flex-[2] min-w-0 flex flex-col gap-6 overflow-hidden">
+        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-4">
+          <div className="flex items-center justify-between pb-3 border-b border-border">
+            <h3 className="font-semibold text-xs text-foreground tracking-wider">🧪 运行测试反馈控制台</h3>
+            {testJobId && jobFinished && (
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                className="h-6 px-2 text-[10px]"
+                onClick={clearJobInStore}
+              >
+                清空
+              </Button>
+            )}
+          </div>
+          {testJobId ? (
+            <JobProgress
+              jobId={testJobId}
+              // 终态回调只标记 finished，不卸载组件、不动 store 里的 lastSnapshot，
+              // 保证刷新前后用户都能看到完整 step 流水。
+              onComplete={markFinished}
+            />
+          ) : (
+            <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
+              <span className="text-3xl block">🔬</span>
+              <p className="text-xs">暂无测试进程运行</p>
+              <p className="text-[10px]">配置左侧参数后点击"立即执行加友测试"即可捕获并监听本地指令</p>
+            </div>
+          )}
+        </Card>
+
+        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-3 overflow-hidden">
+          <div className="flex items-center justify-between pb-3 border-b border-border">
+            <h3 className="font-semibold text-xs text-foreground tracking-wider">📒 审计事件</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              className="h-6 px-2 text-[10px]"
+              disabled={!testLeadId || auditQuery.isFetching}
+              onClick={() => auditQuery.refetch()}
+            >
+              {auditQuery.isFetching ? '刷新中…' : '刷新审计'}
+            </Button>
+          </div>
+
+          <AuditEventList
+            leadId={testLeadId}
+            events={auditQuery.data ?? []}
+            isLoading={auditQuery.isLoading}
+            error={auditQuery.error as Error | null}
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// 沿用老 frontend/index.html#auditCards 的卡片结构：event_type + timestamp、message、
+// 以及 result/reason_code/phone_masked 标签。新版去掉了老页面里那些手动按钮触发的
+// "创建线索 / 开始通话 / 提交小结" 步骤事件展示——这些现在已经由"立即执行"按钮
+// 一键自动完成，不再需要单独可视化每一步。
+function AuditEventList({
+  leadId,
+  events,
+  isLoading,
+  error,
+}: {
+  leadId: string | null;
+  events: AuditEvent[];
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  if (!leadId) {
+    return (
+      <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
+        <span className="text-3xl block">🗂️</span>
+        <p className="text-xs">暂无审计事件</p>
+        <p className="text-[10px]">执行测试后会按 lead_id 拉取本次测试相关的审计流</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="text-[11px] text-rose-500 font-semibold">❌ {error.message}</p>
+    );
+  }
+
+  if (isLoading && events.length === 0) {
+    return <p className="text-[11px] text-muted-foreground">正在加载审计事件…</p>;
+  }
+
+  if (events.length === 0) {
+    return <p className="text-[11px] text-muted-foreground">暂未捕获到事件</p>;
+  }
+
+  // 后端默认按 timestamp 升序返回；测试控制台希望最近的事件在最上面
+  const sorted = [...events].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+
+  return (
+    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+      {sorted.map((ev, idx) => (
+        <article
+          key={`${ev.event_type}-${ev.timestamp}-${idx}`}
+          className="border border-border rounded-xl p-3 bg-muted/20"
+        >
+          <header className="flex justify-between gap-2 items-center">
+            <strong className="text-xs text-foreground break-all">{ev.event_type}</strong>
+            <time className="text-[10px] text-muted-foreground whitespace-nowrap">
+              {formatTimestamp(ev.timestamp)}
+            </time>
+          </header>
+          <p className="mt-1.5 text-[11px] text-foreground/80">
+            {ev.message || ev.reason_code || '无消息'}
+          </p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {ev.result && <MetaPill tone={resultTone(ev.result)}>结果 {ev.result}</MetaPill>}
+            {ev.reason_code && <MetaPill>原因 {ev.reason_code}</MetaPill>}
+            {ev.phone_masked && <MetaPill>{ev.phone_masked}</MetaPill>}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MetaPill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'fail' }) {
+  const toneClass =
+    tone === 'success'
+      ? 'bg-emerald-500/15 text-emerald-600'
+      : tone === 'warn'
+        ? 'bg-amber-500/15 text-amber-600'
+        : tone === 'fail'
+          ? 'bg-rose-500/15 text-rose-600'
+          : 'bg-muted text-muted-foreground';
+  return (
+    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${toneClass}`}>
+      {children}
+    </span>
+  );
+}
+
+function resultTone(result: string): 'default' | 'success' | 'warn' | 'fail' {
+  const r = result.toLowerCase();
+  if (r === 'success' || r === 'accepted' || r === 'approved') return 'success';
+  if (r === 'failed' || r === 'blocked') return 'fail';
+  if (r === 'pending' || r === 'queued' || r === 'started' || r === 'business_outcome') return 'warn';
+  return 'default';
+}
+
+function formatTimestamp(ts: string): string {
+  // 后端写的是 ISO-8601 with timezone；展示时只保留 HH:mm:ss，便于在窄列里阅读。
+  // 解析失败时原样返回，避免吃掉调试线索。
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}

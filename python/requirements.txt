@@ -1,0 +1,33 @@
+# =============================================================================
+# 后端核心（跨平台）
+# =============================================================================
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
+pyautogui==0.9.54
+opencv-python==4.10.0.84
+pillow==11.0.0
+rapidfuzz==3.10.1
+
+# =============================================================================
+# Windows 平台依赖（uiautomation + WinRT OCR）
+# =============================================================================
+uiautomation==2.0.20 ; sys_platform == "win32"
+winrt-runtime==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Media.Ocr==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Storage==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Globalization==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1 ; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1 ; sys_platform == "win32"
+
+# =============================================================================
+# macOS 平台依赖（pyobjc + Vision.framework + Accessibility API）
+# =============================================================================
+pyobjc-framework-Cocoa>=10.0 ; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0 ; sys_platform == "darwin"
+pyobjc-framework-Vision>=10.0 ; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == "darwin"

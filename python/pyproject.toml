@@ -1,0 +1,59 @@
+[project]
+name = "wechat-rpa"
+version = "2.0.0"
+description = "AI 销售智能体 RPA 自动加微本地 Demo —— 跨平台（Windows + macOS）视觉/OCR 自愈定位"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+
+# 跨平台核心依赖。平台专属依赖通过 PEP 508 environment marker 收口，
+# uv / pip 都会在对应平台自动解析、跳过不匹配项。
+dependencies = [
+    # ---- 后端核心（跨平台） ----
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "python-dotenv==1.0.1",
+    "pyautogui==0.9.54",
+    "opencv-python==4.10.0.84",
+    "pillow==11.0.0",
+    "rapidfuzz==3.10.1",
+    # ---- Windows 平台（uiautomation + WinRT OCR） ----
+    'uiautomation==2.0.20 ; sys_platform == "win32"',
+    'winrt-runtime==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Media.Ocr==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Graphics.Imaging==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Storage==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Globalization==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Storage.Streams==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Foundation==3.2.1 ; sys_platform == "win32"',
+    'winrt-Windows.Foundation.Collections==3.2.1 ; sys_platform == "win32"',
+    # ---- macOS 平台（pyobjc + Vision.framework + Accessibility API） ----
+    'pyobjc-framework-Cocoa>=10.0 ; sys_platform == "darwin"',
+    'pyobjc-framework-Quartz>=10.0 ; sys_platform == "darwin"',
+    'pyobjc-framework-Vision>=10.0 ; sys_platform == "darwin"',
+    'pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == "darwin"',
+    "pyinstaller>=6.21.0",
+]
+
+[project.optional-dependencies]
+# 开发/测试依赖。安装：uv sync --extra dev
+dev = [
+    "pytest>=8.0",
+    # fastapi.testclient（scripts/smoke_test.py 使用）依赖 httpx
+    "httpx>=0.27",
+]
+
+# 本仓库是应用而非可发布库，关闭构建/打包，uv 仅做依赖与虚拟环境管理。
+[tool.uv]
+package = false
+
+# 国内镜像源加速依赖解析与下载（尤其是体积较大的 winrt-* / opencv）。
+# 如在海外或公司私有源环境，可注释掉本节或改为对应源。
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.pytest.ini_options]
+testpaths = ["backend/app/tests"]
+python_files = ["test_*.py"]
