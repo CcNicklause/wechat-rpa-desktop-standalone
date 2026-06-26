@@ -171,6 +171,7 @@ class UpstreamScheduler:
                 self._task_queue.get_nowait()
             except queue.Empty:
                 break
+        self._queued_lead_ids.clear()
         log_broadcaster.log("本地等待队列已清空")
 
     def _get_network_info(self) -> dict:

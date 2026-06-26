@@ -147,3 +147,26 @@ def test_enqueue_remote_lead_rejects_missing_required_field():
         store = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+def test_clear_queue_resets_duplicate_tracking():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, _store = make_scheduler_for_test(tmp_dir)
+        item = {
+            "lead_id": "remote_lead_clear",
+            "phone": "13800000099",
+            "customer_name": "清队伍",
+            "greeting": "你好，请通过。",
+        }
+
+        assert scheduler.enqueue_remote_lead(item) is True
+        scheduler.clear_queue()
+        re_enqueue_result = scheduler.enqueue_remote_lead(item)
+
+        assert re_enqueue_result is True
+        assert scheduler._task_queue.qsize() == 1
+    finally:
+        scheduler = None
+        gc.collect()
+        tmp_dir.cleanup()
