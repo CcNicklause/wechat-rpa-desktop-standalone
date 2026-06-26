@@ -18,6 +18,15 @@ from backend.app.services.upstream_client import (
 from backend.app.services.upstream_lead_source import PollingLeadSource
 
 
+TERMINAL_LEAD_STATUSES = frozenset({
+    LeadStatus.WECHAT_ACCEPTED.value,
+    LeadStatus.WECHAT_ALREADY_FRIEND.value,
+    LeadStatus.WECHAT_TARGET_NOT_FOUND.value,
+    LeadStatus.WECHAT_RISK_CONTROL.value,
+    LeadStatus.WECHAT_ADD_REJECTED.value,
+})
+
+
 def _get_weixin_pids() -> list:
     """检测 WeChat.exe / Weixin.exe 主进程 PID 列表"""
     pids = []
@@ -156,6 +165,14 @@ class UpstreamScheduler:
 
         try:
             existing = self.store.get_lead(lead_id)
+            if existing and existing.get("status") in TERMINAL_LEAD_STATUSES:
+                log_broadcaster.log(
+                    f"线索 {lead_id} 已是终态 {existing['status']}，跳过入队"
+                )
+                with self._queued_lead_ids_lock:
+                    self._queued_lead_ids.discard(lead_id)
+                return False
+
             if not existing:
                 timestamp = datetime.now(timezone.utc).isoformat()
                 self.store.create_lead({

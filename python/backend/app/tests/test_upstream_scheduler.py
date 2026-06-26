@@ -232,3 +232,80 @@ def test_enqueue_remote_lead_is_thread_safe_against_duplicate_inserts():
         scheduler = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+def test_enqueue_remote_lead_skips_terminal_status():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        timestamp = "2026-06-26T00:00:00+00:00"
+        store.create_lead({
+            "lead_id": "remote_lead_terminal",
+            "customer_name": "已加",
+            "company": "Upstream",
+            "phone": "13800000020",
+            "sales_id": "upstream",
+            "status": LeadStatus.WECHAT_ALREADY_FRIEND.value,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        })
+
+        result = scheduler.enqueue_remote_lead({
+            "lead_id": "remote_lead_terminal",
+            "phone": "13800000020",
+            "customer_name": "已加",
+            "greeting": "你好，请通过。",
+        })
+
+        reloaded = store.get_lead("remote_lead_terminal")
+        assert result is False
+        assert scheduler._task_queue.qsize() == 0
+        assert reloaded is not None
+        assert reloaded["status"] == LeadStatus.WECHAT_ALREADY_FRIEND.value
+        assert "remote_lead_terminal" not in scheduler._queued_lead_ids
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_enqueue_remote_lead_terminal_skip_does_not_block_other_leads():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        timestamp = "2026-06-26T00:00:00+00:00"
+        store.create_lead({
+            "lead_id": "remote_lead_terminal_blocker",
+            "customer_name": "已加",
+            "company": "Upstream",
+            "phone": "13800000021",
+            "sales_id": "upstream",
+            "status": LeadStatus.WECHAT_ALREADY_FRIEND.value,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        })
+
+        terminal_result = scheduler.enqueue_remote_lead({
+            "lead_id": "remote_lead_terminal_blocker",
+            "phone": "13800000021",
+            "customer_name": "已加",
+            "greeting": "你好，请通过。",
+        })
+        fresh_result = scheduler.enqueue_remote_lead({
+            "lead_id": "remote_lead_fresh",
+            "phone": "13800000022",
+            "customer_name": "新线索",
+            "greeting": "你好，请通过。",
+        })
+
+        assert terminal_result is False
+        assert fresh_result is True
+        assert scheduler._task_queue.qsize() == 1
+        queued_item = scheduler._task_queue.get_nowait()
+        assert queued_item["lead_id"] == "remote_lead_fresh"
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
