@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
@@ -16,7 +15,6 @@ export function RiskControl({ audits }: RiskControlProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dailyLimit, setDailyLimit] = useState(3);
-  const [requireApproval, setRequireApproval] = useState(true);
   const [minInterval, setMinInterval] = useState(3);
   const [maxInterval, setMaxInterval] = useState(9);
 
@@ -25,7 +23,6 @@ export function RiskControl({ audits }: RiskControlProps) {
       try {
         const res = await requestLocalApi<any>('/api/v1/health');
         setDailyLimit(res.daily_limit || 3);
-        setRequireApproval(res.real_rpa_requires_human_approval ?? true);
         setMinInterval(res.min_interval ?? 3);
         setMaxInterval(res.max_interval ?? 9);
         setLoading(false);
@@ -43,7 +40,6 @@ export function RiskControl({ audits }: RiskControlProps) {
         method: 'POST',
         body: JSON.stringify({
           daily_limit: dailyLimit,
-          require_human_approval: requireApproval,
           min_interval: minInterval,
           max_interval: maxInterval,
         }),
@@ -86,14 +82,6 @@ export function RiskControl({ audits }: RiskControlProps) {
                 onChange={(e) => setDailyLimit(Number(e.target.value))}
                 className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
               />
-            </div>
-
-            <div className="flex justify-between items-center border border-border p-3.5 bg-muted/20 rounded-xl">
-              <div className="space-y-0.5">
-                <span className="font-semibold text-xs">启动人工确认审批机制</span>
-                <p className="text-[10px] text-muted-foreground">如果关闭，线索进入后将由后台静默脚本发起微信自动化加友</p>
-              </div>
-              <Switch checked={requireApproval} onCheckedChange={setRequireApproval} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

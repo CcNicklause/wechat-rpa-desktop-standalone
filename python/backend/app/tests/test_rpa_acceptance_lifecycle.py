@@ -48,6 +48,37 @@ class TestRpaAcceptanceLifecycle(unittest.TestCase):
         event_names = [call.args[0] for call in audit.record.call_args_list]
         self.assertIn("wechat.friend.requested", event_names)
 
+    def test_real_rpa_queues_without_human_approval(self):
+        store = MagicMock()
+        audit = MagicMock()
+        settings = MagicMock()
+        settings.rpa_mode = "real"
+        settings.rpa_daily_limit = 3
+        settings.rpa_require_human_approval = True
+        store.get_daily_count.return_value = 0
+        store.get_lead.return_value = {
+            "lead_id": "lead_auto",
+            "phone": "lockthename",
+            "sales_id": "sales_demo_001",
+            "customer_consent": 1,
+            "sales_confirmed_call": 1,
+            "consent_evidence": "upstream",
+        }
+        rpa = RpaOrchestrator(store, audit, settings)
+
+        with patch("backend.app.services.rpa_orchestrator.run_background"):
+            response = rpa.add_wechat(
+                lead_id="lead_auto",
+                greeting="hello",
+                dry_run=False,
+                human_approval=False,
+            )
+
+        self.assertEqual(response["status"], "REAL_QUEUED")
+        created_job = store.create_job.call_args.args[0]
+        self.assertEqual(created_job["rpa_mode"], "real")
+        self.assertFalse(created_job["human_approval"])
+
     def test_recheck_worker_turns_pending_request_into_accepted_lead(self):
         temp_dir = tempfile.TemporaryDirectory()
         store = SQLiteStore(Path(temp_dir.name) / "demo.db")

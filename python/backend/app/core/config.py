@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     rpa_min_interval_seconds: int = Field(default=3, ge=0)
     rpa_max_interval_seconds: int = Field(default=9, ge=0)
     rpa_task_timeout_seconds: int = Field(default=90, ge=15, le=600)
-    rpa_require_human_approval: bool = True
+    rpa_require_human_approval: bool = False
     friend_acceptance_recheck_enabled: bool = True
     friend_acceptance_recheck_interval_seconds: int = Field(default=300, ge=30, le=86400)
     friend_acceptance_recheck_batch_size: int = Field(default=3, ge=1, le=10)

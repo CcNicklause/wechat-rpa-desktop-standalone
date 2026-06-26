@@ -206,7 +206,7 @@ export function DevTesting() {
   };
 
   const onSubmit = async (data: TestFormValues) => {
-    // 真实加微需要前端二次人工确认，再把 human_approval 透传给后端
+    // 开发测试页保留前端确认，避免误触真实微信自动化；真实上游队列不需要人工确认。
     if (!data.dryRun) {
       const confirmed = window.confirm(
         `⚠️ 即将执行【真实加微】操作\n\n目标：${data.phone}\n验证语：${data.greeting}\n\n后端会接管 Windows 引擎对微信客户端发送真实指令，是否确认继续？`,
@@ -247,8 +247,7 @@ export function DevTesting() {
       });
 
       // 3. Trigger RPA task
-      // dry_run=false 必须同步把 human_approval 置 true，否则后端会以
-      // HUMAN_APPROVAL_REQUIRED 拒绝（rpa_orchestrator._validate_add_request）。
+      // human_approval 仅作为审计字段保留；后端真实队列不再要求人工二次确认。
       const response = await requestLocalApi<any>('/api/v1/rpa/add-wechat', {
         method: 'POST',
         body: JSON.stringify({

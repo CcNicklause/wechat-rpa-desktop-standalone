@@ -423,8 +423,6 @@ class RpaOrchestrator:
             raise AppError('REAL_RPA_DISABLED', '当前为模拟模式，未触发真实微信操作')
 
         if self.settings.rpa_mode == 'real' and not dry_run:
-            if self.settings.rpa_require_human_approval and not human_approval:
-                raise AppError('HUMAN_APPROVAL_REQUIRED', '真实 RPA 需要人工二次确认')
             try:
                 enforce_daily_limit(self.store, self.settings, lead['sales_id'])
             except AppError:
