@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,6 +11,42 @@ import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { useDevTestStore } from '@/stores/useDevTestStore';
 import { JobProgress } from './JobProgress';
+
+interface BatchLeadRow {
+  lead_id: string;
+  phone: string;
+  customer_name: string;
+  greeting: string;
+}
+
+interface SeedResponse {
+  seeded: number;
+  accepted_by_scheduler: number;
+  scheduler_alive: boolean;
+}
+
+const DEFAULT_GREETING = '您好，我是销售顾问，收到了您的微信申请。';
+
+function makeDefaultRow(index: number): BatchLeadRow {
+  return {
+    lead_id: `dev_mock_${Date.now()}_${index}`,
+    phone: '',
+    customer_name: '',
+    greeting: DEFAULT_GREETING,
+  };
+}
+
+function buildQuickFillRows(count: number): BatchLeadRow[] {
+  return Array.from({ length: count }, (_, i) => {
+    const ordinal = i + 1;
+    return {
+      lead_id: `dev_mock_lead_${ordinal}`,
+      phone: `1380000000${ordinal}`,
+      customer_name: `Mock 测试 ${ordinal}`,
+      greeting: DEFAULT_GREETING,
+    };
+  });
+}
 
 const testSchema = z.object({
   phone: z.string().min(5, '手机号或微信号格式不符合验证规则'),
@@ -38,6 +75,80 @@ const TEMPLATES = [
 export function DevTesting() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const [batchRows, setBatchRows] = useState<BatchLeadRow[]>([makeDefaultRow(0)]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+
+  const updateBatchRow = (index: number, patch: Partial<BatchLeadRow>) => {
+    setBatchRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const addBatchRow = () => {
+    setBatchRows((rows) => [...rows, makeDefaultRow(rows.length)]);
+  };
+
+  const removeBatchRow = (index: number) => {
+    setBatchRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)));
+  };
+
+  const fillFiveMockRows = () => {
+    setBatchRows(buildQuickFillRows(5));
+  };
+
+  const submitBatch = async () => {
+    const invalid = batchRows.some(
+      (row) =>
+        !row.lead_id.trim() ||
+        row.phone.trim().length < 5 ||
+        !row.customer_name.trim() ||
+        !row.greeting.trim(),
+    );
+    if (invalid) {
+      toast({
+        title: '存在不合规的行',
+        description: '请确保每一行 lead_id / phone / customer_name / greeting 都已填写，phone 至少 5 个字符。',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ 后端可能为 real 模式，本次将对 ${batchRows.length} 条线索发起真实加微。是否确认？`,
+    );
+    if (!confirmed) {
+      toast({ title: '已取消', description: '未提交批量模拟线索', variant: 'default' });
+      return;
+    }
+
+    setBatchSubmitting(true);
+    try {
+      const response = await requestLocalApi<SeedResponse>(
+        '/api/v1/upstream/dev/seed-mock-leads',
+        {
+          method: 'POST',
+          body: JSON.stringify({ leads: batchRows }),
+        },
+      );
+      const skipped = response.seeded - response.accepted_by_scheduler;
+      toast({
+        title: `已下发 ${response.seeded} 条到 mock 上游`,
+        description: `调度器接受 ${response.accepted_by_scheduler} 条，${skipped} 条被去重或终态跳过。请到「上游对接」页查看实时日志。`,
+        variant: 'success',
+      });
+    } catch (err: any) {
+      const message = err?.message || '';
+      const isNetworkDown =
+        err instanceof TypeError ||
+        /Failed to fetch|NetworkError|ECONNREFUSED|Connection refused/i.test(message);
+      toast({
+        title: isNetworkDown ? '无法连接本地后端' : '批量下发失败',
+        description: message || '请检查后端状态或上游模式（mock 才允许种子下发）',
+        variant: 'destructive',
+      });
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
 
   // 所有跨刷新需要保留的状态都进了 zustand store + persist；本组件只读不存 useState，
   // 这样即便表单意外触发原生提交导致整树重挂载，重新挂载后能立刻看到上次的 job/审计/表单值。
@@ -188,7 +299,94 @@ export function DevTesting() {
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden p-6 gap-6">
+    <div className="flex-1 flex flex-col overflow-hidden p-6 gap-6">
+      <Card className="p-6 shadow-sm border border-border bg-card">
+        <CardHeader className="p-0 pb-4 border-b border-border mb-4">
+          <CardTitle>批量线索模拟（走真实上游链路）</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 space-y-3 text-xs">
+          <p className="text-[11px] text-muted-foreground">
+            每一行代表一条上游下发的线索。提交后会进入 mock 上游待发池并立即触发一次拉取，
+            后续可在「上游对接」页观察日志、状态和队列。当前 rpa_mode 由后端 .env 决定（默认 real）。
+          </p>
+
+          <div className="space-y-2">
+            <div className="grid grid-cols-[1.2fr_1fr_1fr_1.5fr_auto] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
+              <span>lead_id</span>
+              <span>phone</span>
+              <span>customer_name</span>
+              <span>greeting</span>
+              <span></span>
+            </div>
+            {batchRows.map((row, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-[1.2fr_1fr_1fr_1.5fr_auto] gap-2 items-start"
+              >
+                <input
+                  type="text"
+                  value={row.lead_id}
+                  onChange={(e) => updateBatchRow(index, { lead_id: e.target.value })}
+                  placeholder="dev_mock_..."
+                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                />
+                <input
+                  type="text"
+                  value={row.phone}
+                  onChange={(e) => updateBatchRow(index, { phone: e.target.value })}
+                  placeholder="138..."
+                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                />
+                <input
+                  type="text"
+                  value={row.customer_name}
+                  onChange={(e) => updateBatchRow(index, { customer_name: e.target.value })}
+                  placeholder="测试用户"
+                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                />
+                <input
+                  type="text"
+                  value={row.greeting}
+                  onChange={(e) => updateBatchRow(index, { greeting: e.target.value })}
+                  placeholder="验证语"
+                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => removeBatchRow(index)}
+                  disabled={batchRows.length <= 1}
+                  className="h-7 px-2 text-[10px]"
+                >
+                  删除
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button type="button" size="sm" variant="outline" onClick={addBatchRow}>
+              + 新增一行
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={fillFiveMockRows}>
+              快速填 5 条 mock
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={submitBatch}
+              disabled={batchSubmitting}
+              className="ml-auto"
+            >
+              {batchSubmitting ? '正在下发…' : '⚠️ 一键模拟下发'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex-1 flex overflow-hidden gap-6">
       <Card className="flex-[3] min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
         <CardHeader className="p-0 pb-4 border-b border-border mb-4">
           <CardTitle>手动加友功能测试面板</CardTitle>
@@ -319,6 +517,7 @@ export function DevTesting() {
             error={auditQuery.error as Error | null}
           />
         </Card>
+      </div>
       </div>
     </div>
   );
