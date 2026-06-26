@@ -289,7 +289,8 @@ class UpstreamScheduler:
                 job_id = res["job_id"]
                 job_finished = False
                 while not job_finished and not self._stop_event.is_set():
-                    time.sleep(2.0)
+                    if self._stop_event.wait(2.0):
+                        break
                     job = self.store.get_job(job_id)
                     running_states = (
                         "REAL_QUEUED", "REAL_RUNNING",

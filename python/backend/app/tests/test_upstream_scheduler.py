@@ -309,3 +309,49 @@ def test_enqueue_remote_lead_terminal_skip_does_not_block_other_leads():
         store = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+def test_worker_can_be_interrupted_while_polling_job():
+    import time as _time
+
+    class NeverFinishingOrchestrator:
+        def add_wechat(self, lead_id, greeting, dry_run, human_approval):
+            return {"job_id": f"job_{lead_id}", "status": "REAL_QUEUED"}
+
+    class AlwaysRunningStore(SQLiteStore):
+        def get_job(self, job_id):
+            return {"job_id": job_id, "status": "REAL_RUNNING"}
+
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        settings = get_settings()
+        db_path = Path(tmp_dir.name) / "test.db"
+        store = AlwaysRunningStore(db_path)
+        store.save_upstream_config({"upstream_mode": "mock"})
+        scheduler = UpstreamScheduler(
+            settings=settings,
+            store=store,
+            orchestrator_factory=lambda: NeverFinishingOrchestrator(),
+        )
+        scheduler.start()
+
+        scheduler.enqueue_remote_lead({
+            "lead_id": "remote_lead_stop",
+            "phone": "13800000030",
+            "customer_name": "停止测试",
+            "greeting": "你好，请通过。",
+        })
+
+        _time.sleep(0.5)
+
+        t0 = _time.monotonic()
+        scheduler.stop()
+        elapsed = _time.monotonic() - t0
+
+        assert elapsed < 3.0, f"stop() took {elapsed:.2f}s, expected < 3.0s"
+        assert scheduler.is_alive() is False
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
