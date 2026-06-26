@@ -61,6 +61,15 @@ def test_trigger_fetch_now_persists_lead_with_valid_status():
             orchestrator_factory=lambda: DummyOrchestrator(),
         )
         scheduler.start()
+        # Seed one mock lead so the polling source has something to enqueue
+        from backend.app.services.upstream_client import MockUpstreamClient
+        assert isinstance(scheduler.client, MockUpstreamClient)
+        scheduler.client.seed_leads([{
+            "lead_id": "mock_lead_1",
+            "phone": "13800000001",
+            "customer_name": "莫克测试1",
+            "greeting": "测试上游线索，请求通过。",
+        }])
         scheduler.trigger_fetch_now()
         scheduler.stop()
 

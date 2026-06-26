@@ -1,4 +1,5 @@
 import abc
+import threading
 import httpx
 from typing import List, Dict, Any, Optional
 
@@ -25,7 +26,8 @@ class UpstreamClientInterface(abc.ABC):
 class MockUpstreamClient(UpstreamClientInterface):
     def __init__(self):
         self.token = None
-        self._fetched = False
+        self._pending_leads: List[Dict[str, Any]] = []
+        self._pending_lock = threading.Lock()
 
     def login(self) -> bool:
         self.token = "mock-bearer-token-123456"
@@ -35,19 +37,25 @@ class MockUpstreamClient(UpstreamClientInterface):
         print(f"[Mock Upstream] 心跳成功: status={status}, wechat_online={wechat_online}")
         return True
 
+    def seed_leads(self, leads: List[Dict[str, Any]]) -> int:
+        """注入一批 mock 线索到待发池；返回入池数量。同一 lead_id 在池中只保留一条。"""
+        added = 0
+        with self._pending_lock:
+            existing_ids = {item.get("lead_id") for item in self._pending_leads}
+            for lead in leads:
+                lead_id = lead.get("lead_id")
+                if not lead_id or lead_id in existing_ids:
+                    continue
+                self._pending_leads.append(lead)
+                existing_ids.add(lead_id)
+                added += 1
+        return added
+
     def fetch_leads(self) -> List[Dict[str, Any]]:
-        # 仅下发一次，防止重复无休止添加
-        if self._fetched:
-            return []
-        self._fetched = True
-        return [
-            {
-                "lead_id": "mock_lead_1",
-                "phone": "13800000001",
-                "customer_name": "莫克测试1",
-                "greeting": "测试上游线索，请求通过。",
-            }
-        ]
+        with self._pending_lock:
+            out = list(self._pending_leads)
+            self._pending_leads.clear()
+            return out
 
     def report_lead_status(
         self, lead_id: str, status: str, remark: Optional[str], error_details: Optional[str]
