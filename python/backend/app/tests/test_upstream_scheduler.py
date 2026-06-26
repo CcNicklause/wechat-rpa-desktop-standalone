@@ -149,6 +149,32 @@ def test_enqueue_remote_lead_rejects_missing_required_field():
         tmp_dir.cleanup()
 
 
+def test_trigger_fetch_now_delegates_to_configured_lead_source():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+
+        class FakeLeadSource:
+            def __init__(self):
+                self.fetch_count = 0
+
+            def fetch_once(self):
+                self.fetch_count += 1
+                return 0
+
+        fake_source = FakeLeadSource()
+        scheduler.lead_source = fake_source
+
+        scheduler.trigger_fetch_now()
+
+        assert fake_source.fetch_count == 1
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
 def test_clear_queue_resets_duplicate_tracking():
     tmp_dir = tempfile.TemporaryDirectory()
     try:

@@ -15,6 +15,7 @@ from backend.app.services.upstream_client import (
     MockUpstreamClient,
     RealUpstreamClient,
 )
+from backend.app.services.upstream_lead_source import PollingLeadSource
 
 
 def _get_weixin_pids() -> list:
@@ -73,6 +74,7 @@ class UpstreamScheduler:
         self.orchestrator_factory = orchestrator_factory
 
         self.client: Optional[UpstreamClientInterface] = None
+        self.lead_source: Optional[PollingLeadSource] = None
         self.status_state = "IDLE"  # IDLE, BUSY, COOLDOWN
 
         self._task_queue = queue.Queue()
@@ -100,9 +102,21 @@ class UpstreamScheduler:
 
         log_broadcaster.log(f"上游调度器已启动。当前模式: {mode.upper()}")
 
+        self.lead_source = PollingLeadSource(
+            client=self.client,
+            enqueue_lead=self.enqueue_remote_lead,
+            interval_seconds=float(self.settings.upstream_fetch_interval_seconds),
+            log=log_broadcaster.log,
+        )
+
         # 2. 启动三个后台守护线程
         t_heart = threading.Thread(target=self._heartbeat_loop, name="upstream-heartbeat", daemon=True)
-        t_fetch = threading.Thread(target=self._fetch_loop, name="upstream-fetch", daemon=True)
+        t_fetch = threading.Thread(
+            target=self.lead_source.run,
+            args=(self._stop_event,),
+            name="upstream-fetch",
+            daemon=True,
+        )
         t_worker = threading.Thread(target=self._worker_loop, name="upstream-worker", daemon=True)
 
         self._threads = [t_heart, t_fetch, t_worker]
@@ -159,7 +173,8 @@ class UpstreamScheduler:
 
     def trigger_fetch_now(self):
         log_broadcaster.log("收到前端手动命令：强制立刻执行拉取")
-        self._fetch_action()
+        if self.lead_source:
+            self.lead_source.fetch_once()
 
     def trigger_heartbeat_now(self):
         log_broadcaster.log("收到前端手动命令：强制立刻发送保活心跳")
@@ -215,27 +230,6 @@ class UpstreamScheduler:
             except Exception as e:
                 log_broadcaster.log(f"心跳循环异常: {e}")
             self._stop_event.wait(float(self.settings.upstream_heartbeat_interval_seconds))
-
-    def _fetch_action(self):
-        if not self.client or self.status_state != "IDLE":
-            return
-        log_broadcaster.log("正在尝试拉取待添加线索...")
-        leads = self.client.fetch_leads()
-        if not leads:
-            log_broadcaster.log("暂无待加微线索")
-            return
-
-        log_broadcaster.log(f"📥 成功拉取到 {len(leads)} 个线索")
-        for item in leads:
-            self.enqueue_remote_lead(item)
-
-    def _fetch_loop(self):
-        while not self._stop_event.is_set():
-            try:
-                self._fetch_action()
-            except Exception as e:
-                log_broadcaster.log(f"拉取循环异常: {e}")
-            self._stop_event.wait(float(self.settings.upstream_fetch_interval_seconds))
 
     def _worker_loop(self):
         while not self._stop_event.is_set():
