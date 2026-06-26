@@ -6,10 +6,8 @@ from backend.app.services.upstream_lead_source import PollingLeadSource
 class FakeClient:
     def __init__(self, leads):
         self.leads = leads
-        self.fetch_count = 0
 
     def fetch_leads(self):
-        self.fetch_count += 1
         return self.leads
 
 

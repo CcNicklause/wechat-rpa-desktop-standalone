@@ -1,6 +1,7 @@
 import gc
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -46,7 +47,7 @@ def test_scheduler_lifecycle():
         tmp_dir.cleanup()
 
 
-def test_fetch_action_stores_lead_with_valid_status():
+def test_trigger_fetch_now_persists_lead_with_valid_status():
     tmp_dir = tempfile.TemporaryDirectory()
     try:
         settings = get_settings()
@@ -191,6 +192,41 @@ def test_clear_queue_resets_duplicate_tracking():
         re_enqueue_result = scheduler.enqueue_remote_lead(item)
 
         assert re_enqueue_result is True
+        assert scheduler._task_queue.qsize() == 1
+    finally:
+        scheduler = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_enqueue_remote_lead_is_thread_safe_against_duplicate_inserts():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, _store = make_scheduler_for_test(tmp_dir)
+        item = {
+            "lead_id": "remote_lead_concurrent",
+            "phone": "13800000077",
+            "customer_name": "并发测试",
+            "greeting": "你好，请通过。",
+        }
+        start_gate = threading.Event()
+        results: list[bool] = []
+        results_lock = threading.Lock()
+
+        def worker():
+            start_gate.wait()
+            outcome = scheduler.enqueue_remote_lead(item)
+            with results_lock:
+                results.append(outcome)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        start_gate.set()
+        for t in threads:
+            t.join()
+
+        assert sum(1 for outcome in results if outcome) == 1
         assert scheduler._task_queue.qsize() == 1
     finally:
         scheduler = None

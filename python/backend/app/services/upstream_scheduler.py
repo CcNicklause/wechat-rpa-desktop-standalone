@@ -79,6 +79,7 @@ class UpstreamScheduler:
 
         self._task_queue = queue.Queue()
         self._queued_lead_ids: set[str] = set()
+        self._queued_lead_ids_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._threads: List[threading.Thread] = []
 
@@ -145,31 +146,40 @@ class UpstreamScheduler:
         phone = item["phone"]
         customer_name = item["customer_name"]
 
-        if lead_id in self._queued_lead_ids:
-            log_broadcaster.log(f"线索 {lead_id} 已在本地等待队列中，跳过重复入队")
-            return False
+        # 拉取线程与前端手动触发可能并发进入；先抢占去重位再做持久化/入队，
+        # 避免多个线程同时通过 `in` 检查后重复 `create_lead` 触发 UNIQUE 冲突。
+        with self._queued_lead_ids_lock:
+            if lead_id in self._queued_lead_ids:
+                log_broadcaster.log(f"线索 {lead_id} 已在本地等待队列中，跳过重复入队")
+                return False
+            self._queued_lead_ids.add(lead_id)
 
-        existing = self.store.get_lead(lead_id)
-        if not existing:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            self.store.create_lead({
-                "lead_id": lead_id,
-                "customer_name": customer_name,
-                "company": "Upstream",
-                "phone": phone,
-                "sales_id": "upstream",
-                "status": LeadStatus.RPA_PENDING_APPROVAL.value,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            })
-            log_broadcaster.log(f"线索 {customer_name} ({phone}) 已写入本地数据库")
-        else:
-            log_broadcaster.log(f"线索 {lead_id} 已存在本地数据库，跳过重复写入")
+        try:
+            existing = self.store.get_lead(lead_id)
+            if not existing:
+                timestamp = datetime.now(timezone.utc).isoformat()
+                self.store.create_lead({
+                    "lead_id": lead_id,
+                    "customer_name": customer_name,
+                    "company": "Upstream",
+                    "phone": phone,
+                    "sales_id": "upstream",
+                    "status": LeadStatus.RPA_PENDING_APPROVAL.value,
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                })
+                log_broadcaster.log(f"线索 {customer_name} ({phone}) 已写入本地数据库")
+            else:
+                log_broadcaster.log(f"线索 {lead_id} 已存在本地数据库，跳过重复写入")
 
-        self._queued_lead_ids.add(lead_id)
-        self._task_queue.put(item)
-        log_broadcaster.log(f"线索 {customer_name} ({phone}) 已推入本地等待消费队列")
-        return True
+            self._task_queue.put(item)
+            log_broadcaster.log(f"线索 {customer_name} ({phone}) 已推入本地等待消费队列")
+            return True
+        except Exception:
+            # 任一持久化/入队步骤失败，回滚去重位，允许后续重试。
+            with self._queued_lead_ids_lock:
+                self._queued_lead_ids.discard(lead_id)
+            raise
 
     def trigger_fetch_now(self):
         log_broadcaster.log("收到前端手动命令：强制立刻执行拉取")
@@ -186,7 +196,8 @@ class UpstreamScheduler:
                 self._task_queue.get_nowait()
             except queue.Empty:
                 break
-        self._queued_lead_ids.clear()
+        with self._queued_lead_ids_lock:
+            self._queued_lead_ids.clear()
         log_broadcaster.log("本地等待队列已清空")
 
     def _get_network_info(self) -> dict:
@@ -295,5 +306,6 @@ class UpstreamScheduler:
             self._stop_event.wait(float(cooldown_time))
 
             self.status_state = "IDLE"
-            self._queued_lead_ids.discard(lead_id)
+            with self._queued_lead_ids_lock:
+                self._queued_lead_ids.discard(lead_id)
             self._task_queue.task_done()

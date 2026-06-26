@@ -15,7 +15,7 @@ class PollingLeadSource:
     ):
         self.client = client
         self.enqueue_lead = enqueue_lead
-        self.interval_seconds = interval_seconds
+        self.interval_seconds = float(interval_seconds)
         self.log = log
 
     def fetch_once(self) -> int:
@@ -38,4 +38,4 @@ class PollingLeadSource:
                 self.fetch_once()
             except Exception as e:
                 self.log(f"拉取循环异常: {e}")
-            stop_event.wait(float(self.interval_seconds))
+            stop_event.wait(self.interval_seconds)
