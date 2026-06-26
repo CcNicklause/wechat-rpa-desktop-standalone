@@ -3,11 +3,13 @@ import queue
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from typing import Dict, Any
 
 from backend.app.api.deps import get_store, get_settings
 from backend.app.storage.sqlite_store import SQLiteStore
 from backend.app.core.config import Settings
+from backend.app.services.upstream_client import MockUpstreamClient
 from backend.app.services.upstream_scheduler import log_broadcaster
 
 router = APIRouter(prefix="/api/v1/upstream", tags=["upstream"])
@@ -76,6 +78,43 @@ def clear_queue(scheduler=Depends(get_scheduler)):
         raise HTTPException(status_code=400, detail="Scheduler not ready")
     scheduler.clear_queue()
     return {"status": "cleared"}
+
+
+class SeedLead(BaseModel):
+    lead_id: str = Field(min_length=1)
+    phone: str = Field(min_length=1)
+    customer_name: str = Field(min_length=1)
+    greeting: str = Field(min_length=1)
+
+
+class SeedMockLeadsRequest(BaseModel):
+    leads: list[SeedLead] = Field(min_length=1)
+
+
+@router.post("/dev/seed-mock-leads")
+def seed_mock_leads(payload: SeedMockLeadsRequest, scheduler=Depends(get_scheduler)):
+    if not scheduler or scheduler.client is None:
+        raise HTTPException(status_code=400, detail="Scheduler not ready")
+    if not isinstance(scheduler.client, MockUpstreamClient):
+        raise HTTPException(
+            status_code=400,
+            detail="Seed only available in mock mode",
+        )
+    if scheduler.lead_source is None:
+        raise HTTPException(status_code=400, detail="Scheduler not ready")
+
+    leads = [lead.model_dump() for lead in payload.leads]
+    seeded = scheduler.client.seed_leads(leads)
+    log_broadcaster.log(
+        f"收到前端开发测试页种子下发：{seeded} 条线索已入 mock 上游待发池"
+    )
+    accepted = scheduler.lead_source.fetch_once()
+
+    return {
+        "seeded": seeded,
+        "accepted_by_scheduler": accepted,
+        "scheduler_alive": scheduler.is_alive(),
+    }
 
 
 @router.get("/logs")
