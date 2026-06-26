@@ -19,3 +19,11 @@ def test_save_and_get_config():
         store = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+def test_default_lead_source_mode_is_polling():
+    from backend.app.core.config import Settings
+
+    settings = Settings()
+
+    assert settings.lead_source_mode == "polling"

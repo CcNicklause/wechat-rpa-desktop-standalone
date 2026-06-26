@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     cors_allow_origins: str = 'http://127.0.0.1:5500,http://localhost:5500,null'
 
     upstream_mode: Literal['mock', 'real'] = 'mock'
+    lead_source_mode: Literal['polling', 'sse', 'hybrid'] = 'polling'
     upstream_api_url: str = 'http://localhost:8000/api/v1/upstream'
     client_id: str = 'client-001'
     client_secret: str = 'secret-xyz123'
