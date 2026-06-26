@@ -6,6 +6,7 @@ const LeadsDashboard = lazy(() => import('../features/LeadsDashboard').then(m =>
 const AccountManagement = lazy(() => import('../features/AccountManagement').then(m => ({ default: m.AccountManagement })));
 const RiskControl = lazy(() => import('../features/RiskControl').then(m => ({ default: m.RiskControl })));
 const DevTesting = lazy(() => import('../features/DevTesting').then(m => ({ default: m.DevTesting })));
+const UpstreamConfig = lazy(() => import('../features/UpstreamConfig').then(m => ({ default: m.UpstreamConfig })));
 
 
 import { useLeadsQuery } from '@/hooks/useLeads';
@@ -81,6 +82,8 @@ export function AppShell() {
               return <AccountManagement />;
             case '/risk':
               return <RiskControl audits={audits} />;
+            case '/upstream':
+              return <UpstreamConfig />;
             case '/test':
               return <DevTesting />;
             default:

@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     audit_log_path: str = 'backend/data/audit.jsonl'
     cors_allow_origins: str = 'http://127.0.0.1:5500,http://localhost:5500,null'
 
+    upstream_mode: Literal['mock', 'real'] = 'mock'
+    upstream_api_url: str = 'http://localhost:8000/api/v1/upstream'
+    client_id: str = 'client-001'
+    client_secret: str = 'secret-xyz123'
+    upstream_heartbeat_interval_seconds: int = 30
+    upstream_fetch_interval_seconds: int = 60
+
     @property
     def db_file(self) -> Path:
         from backend.app.core.paths import get_data_dir

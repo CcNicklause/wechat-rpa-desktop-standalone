@@ -2,13 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.deps import get_store
-from backend.app.api.routes import audit, friend_acceptance, health, leads, rpa
+from backend.app.api.routes import audit, friend_acceptance, health, leads, rpa, upstream
 from backend.app.core.audit import AuditLogger, utc_now
 from backend.app.core.config import get_settings
 from backend.app.services.friend_acceptance import (
     start_friend_acceptance_rechecker,
     stop_friend_acceptance_rechecker,
 )
+from backend.app.services.rpa_orchestrator import RpaOrchestrator
+from backend.app.services.upstream_scheduler import UpstreamScheduler
 
 settings = get_settings()
 import os
@@ -35,6 +37,7 @@ app.include_router(leads.router)
 app.include_router(rpa.router)
 app.include_router(friend_acceptance.router)
 app.include_router(audit.router)
+app.include_router(upstream.router)
 
 
 @app.on_event('startup')
@@ -53,7 +56,14 @@ def startup() -> None:
         )
     start_friend_acceptance_rechecker(settings, store, audit_logger)
 
+    # 初始化全局上游调度器单例
+    orchestrator_factory = lambda: RpaOrchestrator(store, audit_logger, settings)
+    upstream.global_scheduler = UpstreamScheduler(settings, store, orchestrator_factory)
+    upstream.global_scheduler.start()
+
 
 @app.on_event('shutdown')
 def shutdown() -> None:
+    if upstream.global_scheduler:
+        upstream.global_scheduler.stop()
     stop_friend_acceptance_rechecker()

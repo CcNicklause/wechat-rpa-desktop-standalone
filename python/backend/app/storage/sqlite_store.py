@@ -76,6 +76,11 @@ class SQLiteStore:
                     count INTEGER NOT NULL,
                     PRIMARY KEY (sales_id, day)
                 );
+
+                CREATE TABLE IF NOT EXISTS upstream_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
             # 轻量迁移：为已存在的旧库补 outcome_type 列（CREATE TABLE IF NOT
@@ -288,6 +293,19 @@ class SQLiteStore:
                 """,
                 (sales_id, day),
             )
+
+    def save_upstream_config(self, config: dict[str, Any]) -> None:
+        with self._lock, self._connect() as conn:
+            for k, v in config.items():
+                conn.execute(
+                    "INSERT OR REPLACE INTO upstream_config (key, value) VALUES (?, ?)",
+                    (k, str(v))
+                )
+
+    def get_upstream_config(self) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM upstream_config").fetchall()
+        return {row["key"]: row["value"] for row in rows}
 
     @staticmethod
     def _nullable_bool(value: Any) -> int | None:
