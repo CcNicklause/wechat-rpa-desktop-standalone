@@ -364,3 +364,28 @@ def test_worker_can_be_interrupted_while_polling_job():
         store = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+def test_enqueue_remote_lead_writes_consent_fields():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+
+        result = scheduler.enqueue_remote_lead({
+            "lead_id": "remote_lead_consent",
+            "phone": "13800000050",
+            "customer_name": "授权客户",
+            "greeting": "你好，请通过。",
+        })
+
+        lead = store.get_lead("remote_lead_consent")
+        assert result is True
+        assert lead is not None
+        assert lead["customer_consent"] == 1
+        assert lead["sales_confirmed_call"] == 1
+        assert lead["consent_evidence"] == "upstream"
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()

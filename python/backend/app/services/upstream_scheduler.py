@@ -181,6 +181,9 @@ class UpstreamScheduler:
                     "phone": phone,
                     "sales_id": "upstream",
                     "status": LeadStatus.RPA_PENDING_APPROVAL.value,
+                    "customer_consent": 1,
+                    "sales_confirmed_call": 1,
+                    "consent_evidence": "upstream",
                     "created_at": timestamp,
                     "updated_at": timestamp,
                 })
