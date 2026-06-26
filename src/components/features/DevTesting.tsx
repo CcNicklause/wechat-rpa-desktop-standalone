@@ -299,7 +299,7 @@ export function DevTesting() {
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-6 gap-6">
+    <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
       <Card className="p-6 shadow-sm border border-border bg-card">
         <CardHeader className="p-0 pb-4 border-b border-border mb-4">
           <CardTitle>批量线索模拟（走真实上游链路）</CardTitle>
@@ -386,12 +386,12 @@ export function DevTesting() {
         </CardContent>
       </Card>
 
-      <div className="flex-1 flex overflow-hidden gap-6">
-      <Card className="flex-[3] min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)] gap-6 items-start pb-6">
+      <Card className="min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
         <CardHeader className="p-0 pb-4 border-b border-border mb-4">
           <CardTitle>手动加友功能测试面板</CardTitle>
         </CardHeader>
-        <CardContent className="p-0 flex-1 flex flex-col justify-between">
+        <CardContent className="p-0">
           <form
             // 显式拦截原生提交，防止 Tauri webview 把表单 action="" 当作页面 reload，
             // 导致 AppShell 整树重挂载、hash 路由被默认值覆盖到 #/dashboard。
@@ -463,8 +463,8 @@ export function DevTesting() {
         </CardContent>
       </Card>
 
-      <div className="flex-[2] min-w-0 flex flex-col gap-6 overflow-hidden">
-        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-4">
+      <div className="min-w-0 flex flex-col gap-6">
+        <Card className="min-h-[236px] p-6 border border-border bg-card flex flex-col gap-4">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">🧪 运行测试反馈控制台</h3>
             {testJobId && jobFinished && (
@@ -495,7 +495,7 @@ export function DevTesting() {
           )}
         </Card>
 
-        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-3 overflow-hidden">
+        <Card className="min-h-[236px] max-h-[420px] p-6 border border-border bg-card flex flex-col gap-3 overflow-hidden">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">📒 审计事件</h3>
             <Button

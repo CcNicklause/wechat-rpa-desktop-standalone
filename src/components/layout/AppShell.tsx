@@ -95,13 +95,13 @@ export function AppShell() {
   };
 
   return (
-    <div className="relative flex h-screen bg-background text-foreground overflow-hidden w-full transition-colors duration-300">
+    <div className="relative flex flex-1 min-h-0 bg-background text-foreground overflow-hidden w-full transition-colors duration-300">
       <Sidebar
         activePath={activePath}
         onNavigate={navigate}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden relative z-10 bg-muted/10">
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative z-10 bg-muted/10">
         <DashboardHeader />
         {renderRoute()}
       </main>

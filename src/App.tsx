@@ -137,7 +137,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col justify-between overflow-hidden bg-background text-foreground transition-colors duration-300">
+    <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground transition-colors duration-300">
       <AppShell />
       <StatusBar />
       <ToastContainer />
