@@ -95,12 +95,17 @@ class SQLiteStore:
                 """
                 INSERT INTO leads (
                     lead_id, customer_name, company, phone, sales_id, status,
-                    customer_consent, sales_confirmed_call, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+                    customer_consent, sales_confirmed_call, consent_evidence,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     lead['lead_id'], lead['customer_name'], lead['company'], lead['phone'],
-                    lead['sales_id'], lead['status'], lead['created_at'], lead['updated_at'],
+                    lead['sales_id'], lead['status'],
+                    int(bool(lead.get('customer_consent', 0))),
+                    int(bool(lead.get('sales_confirmed_call', 0))),
+                    lead.get('consent_evidence'),
+                    lead['created_at'], lead['updated_at'],
                 ),
             )
 
