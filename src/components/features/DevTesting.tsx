@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -113,7 +112,9 @@ export function DevTesting() {
     }
 
     const confirmed = window.confirm(
-      `⚠️ 后端可能为 real 模式，本次将对 ${batchRows.length} 条线索发起真实加微。是否确认？`,
+      `⚠️ 即将下发 ${batchRows.length} 条线索到 mock 上游待发池，` +
+        `并立即触发本地拉取与 RPA 队列执行。\n\n` +
+        `本地 rpa_mode 决定后续是模拟还是真实加微（默认 real）。是否确认？`,
     );
     if (!confirmed) {
       toast({ title: '已取消', description: '未提交批量模拟线索', variant: 'default' });
