@@ -4,7 +4,7 @@ import subprocess
 import threading
 import time
 import random
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from datetime import datetime, timezone
 
 from backend.app.core.config import Settings
@@ -76,6 +76,7 @@ class UpstreamScheduler:
         self.status_state = "IDLE"  # IDLE, BUSY, COOLDOWN
 
         self._task_queue = queue.Queue()
+        self._queued_lead_ids: set[str] = set()
         self._stop_event = threading.Event()
         self._threads: List[threading.Thread] = []
 
@@ -118,6 +119,43 @@ class UpstreamScheduler:
 
     def is_alive(self) -> bool:
         return len(self._threads) > 0
+
+    def enqueue_remote_lead(self, item: dict) -> bool:
+        required_fields = ("lead_id", "phone", "customer_name", "greeting")
+        missing = [field for field in required_fields if not item.get(field)]
+        if missing:
+            log_broadcaster.log(f"⚠️ 远程线索缺少必要字段，已跳过: {', '.join(missing)}")
+            return False
+
+        lead_id = item["lead_id"]
+        phone = item["phone"]
+        customer_name = item["customer_name"]
+
+        if lead_id in self._queued_lead_ids:
+            log_broadcaster.log(f"线索 {lead_id} 已在本地等待队列中，跳过重复入队")
+            return False
+
+        existing = self.store.get_lead(lead_id)
+        if not existing:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            self.store.create_lead({
+                "lead_id": lead_id,
+                "customer_name": customer_name,
+                "company": "Upstream",
+                "phone": phone,
+                "sales_id": "upstream",
+                "status": LeadStatus.RPA_PENDING_APPROVAL.value,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            })
+            log_broadcaster.log(f"线索 {customer_name} ({phone}) 已写入本地数据库")
+        else:
+            log_broadcaster.log(f"线索 {lead_id} 已存在本地数据库，跳过重复写入")
+
+        self._queued_lead_ids.add(lead_id)
+        self._task_queue.put(item)
+        log_broadcaster.log(f"线索 {customer_name} ({phone}) 已推入本地等待消费队列")
+        return True
 
     def trigger_fetch_now(self):
         log_broadcaster.log("收到前端手动命令：强制立刻执行拉取")
@@ -188,28 +226,7 @@ class UpstreamScheduler:
 
         log_broadcaster.log(f"📥 成功拉取到 {len(leads)} 个线索")
         for item in leads:
-            # 1. 写入本地 SQLite leads 表
-            lead_id = item["lead_id"]
-            phone = item["phone"]
-            customer_name = item["customer_name"]
-
-            # 兼容去重写入
-            existing = self.store.get_lead(lead_id)
-            if not existing:
-                self.store.create_lead({
-                    "lead_id": lead_id,
-                    "customer_name": customer_name,
-                    "company": "Upstream",
-                    "phone": phone,
-                    "sales_id": "upstream",
-                    "status": LeadStatus.RPA_PENDING_APPROVAL.value,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                })
-
-            # 2. 推入线程队列
-            self._task_queue.put(item)
-            log_broadcaster.log(f"线索 {customer_name} ({phone}) 已推入本地等待消费队列")
+            self.enqueue_remote_lead(item)
 
     def _fetch_loop(self):
         while not self._stop_event.is_set():
@@ -283,4 +300,5 @@ class UpstreamScheduler:
             self._stop_event.wait(float(cooldown_time))
 
             self.status_state = "IDLE"
+            self._queued_lead_ids.discard(lead_id)
             self._task_queue.task_done()

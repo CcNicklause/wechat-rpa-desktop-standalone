@@ -85,3 +85,65 @@ def test_get_weixin_pids_detects_weixin_process_name():
 
     with patch("backend.app.services.upstream_scheduler.subprocess.run", side_effect=fake_run):
         assert _get_weixin_pids() == [6900]
+
+
+def make_scheduler_for_test(tmp_dir):
+    settings = get_settings()
+    db_path = Path(tmp_dir.name) / "test.db"
+    store = SQLiteStore(db_path)
+    store.save_upstream_config({"upstream_mode": "mock"})
+    scheduler = UpstreamScheduler(
+        settings=settings,
+        store=store,
+        orchestrator_factory=lambda: DummyOrchestrator(),
+    )
+    return scheduler, store
+
+
+def test_enqueue_remote_lead_persists_valid_lead_and_queues_once():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        item = {
+            "lead_id": "remote_lead_1",
+            "phone": "13800000011",
+            "customer_name": "赵六",
+            "greeting": "你好，请通过。",
+        }
+
+        first_result = scheduler.enqueue_remote_lead(item)
+        second_result = scheduler.enqueue_remote_lead(item)
+
+        lead = store.get_lead("remote_lead_1")
+        assert first_result is True
+        assert second_result is False
+        assert lead is not None
+        assert lead["status"] == LeadStatus.RPA_PENDING_APPROVAL.value
+        assert scheduler._task_queue.qsize() == 1
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_enqueue_remote_lead_rejects_missing_required_field():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        item = {
+            "lead_id": "remote_lead_missing_phone",
+            "customer_name": "缺少手机号",
+            "greeting": "你好，请通过。",
+        }
+
+        result = scheduler.enqueue_remote_lead(item)
+
+        assert result is False
+        assert store.get_lead("remote_lead_missing_phone") is None
+        assert scheduler._task_queue.qsize() == 0
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
