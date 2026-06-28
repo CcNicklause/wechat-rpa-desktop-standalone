@@ -12,11 +12,14 @@ class PollingLeadSource:
         enqueue_lead: Callable[[dict[str, Any]], bool],
         interval_seconds: float,
         log: Callable[[str], None],
+        is_frozen: Callable[[], bool] | None = None,
     ):
         self.client = client
         self.enqueue_lead = enqueue_lead
         self.interval_seconds = float(interval_seconds)
         self.log = log
+        # 用回调注入而不是 scheduler 引用，避免循环依赖；为旧调用方留 None 默认值。
+        self.is_frozen = is_frozen or (lambda: False)
 
     def fetch_once(self) -> int:
         self.log("正在尝试拉取待添加线索...")
@@ -34,8 +37,13 @@ class PollingLeadSource:
 
     def run(self, stop_event: threading.Event) -> None:
         while not stop_event.is_set():
-            try:
-                self.fetch_once()
-            except Exception as e:
-                self.log(f"拉取循环异常: {e}")
+            # RISK_FROZEN 期间跳过 fetch（设计 §1）：本地队列已 enqueue 的任务会
+            # 在 worker_loop 里被回插队尾，新一波远端线索不应该再叠加进来。
+            if self.is_frozen():
+                self.log("⏸ 调度器 RISK_FROZEN 中，本轮跳过远端拉取")
+            else:
+                try:
+                    self.fetch_once()
+                except Exception as e:
+                    self.log(f"拉取循环异常: {e}")
             stop_event.wait(self.interval_seconds)

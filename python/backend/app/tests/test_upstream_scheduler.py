@@ -444,3 +444,148 @@ def test_friend_check_reports_are_sent_to_mock_upstream():
         store = None
         gc.collect()
         tmp_dir.cleanup()
+
+
+# ----- Cycle 1 新增：lead_status_reports outbox 路径 -----
+
+def test_report_lead_status_once_drains_pending_to_sent():
+    """outbox 守护线程的核心：list_pending → client.report_lead_status → mark_sent。"""
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        scheduler.client = MockUpstreamClient()
+        store.enqueue_lead_status_report(
+            lead_id="lead_outbox_a",
+            job_id="job_outbox_a",
+            upstream_status="REAL_SENT",
+            remark="13800==Customer",
+            error_details=None,
+            payload={"lead_id": "lead_outbox_a", "status": "REAL_SENT"},
+            timestamp="2026-06-28T00:00:00+00:00",
+        )
+
+        result = scheduler._report_lead_status_once()
+
+        assert result["reported"] == 1 and result["failed"] == 0
+        assert store.list_pending_lead_status_reports(10) == []
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_report_lead_status_once_marks_failed_after_max_attempts():
+    """模拟上游持续失败：触达 max_attempts 后 status → FAILED 不再返出。"""
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        # 真实 settings 不可写，复制一份对象式的轻量代理
+        scheduler.settings = type(
+            "S", (),
+            dict(
+                lead_status_report_batch_size=10,
+                lead_status_report_max_attempts=3,
+                friend_check_report_batch_size=10,
+            ),
+        )()
+
+        class _AlwaysFailClient(MockUpstreamClient):
+            def report_lead_status(self, *a, **kw):
+                return False
+
+        scheduler.client = _AlwaysFailClient()
+        store.enqueue_lead_status_report(
+            lead_id="lead_fail",
+            job_id="job_fail",
+            upstream_status="REAL_SENT",
+            remark=None,
+            error_details=None,
+            payload={},
+            timestamp="2026-06-28T00:00:00+00:00",
+        )
+
+        for _ in range(3):
+            scheduler._report_lead_status_once()
+
+        # 状态机检查：FAILED 行不再返出 pending；再次 flush 也不重投，是 outbox 死信语义
+        assert store.list_pending_lead_status_reports(10) == []
+        assert scheduler._report_lead_status_once() == {
+            "reported": 0, "failed": 0, "results": [],
+        }
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_worker_loop_writes_to_outbox_instead_of_direct_report():
+    """关键改动：_worker_loop 不再直接 client.report_lead_status，
+    而是 store.enqueue_lead_status_report；守护线程异步 flush。"""
+    from backend.app.services.upstream_scheduler import UpstreamScheduler
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+
+        captured_reports = []
+        class _RecordingClient(MockUpstreamClient):
+            def report_lead_status(self, *args, **kwargs):
+                captured_reports.append(("direct", args, kwargs))
+                return super().report_lead_status(*args, **kwargs)
+
+        scheduler.client = _RecordingClient()
+
+        class _ImmediateOrchestrator:
+            def add_wechat(self, lead_id, greeting, dry_run, human_approval):
+                store.create_job({
+                    "job_id": "job_w1",
+                    "lead_id": lead_id,
+                    "status": "REAL_COMPLETED",
+                    "rpa_mode": "real",
+                    "dry_run": False,
+                    "human_approval": False,
+                    "greeting": greeting,
+                    "steps": [],
+                    "error_code": None,
+                    "error_message": None,
+                    "created_at": "2026-06-28T00:00:00+00:00",
+                    "updated_at": "2026-06-28T00:00:00+00:00",
+                })
+                return {"job_id": "job_w1", "status": "REAL_COMPLETED"}
+
+        scheduler.orchestrator_factory = lambda: _ImmediateOrchestrator()
+
+        # 直接喂一条任务给 _task_queue，跑一次 worker 后 stop
+        scheduler._task_queue.put({
+            "lead_id": "lead_w1",
+            "phone": "138",
+            "customer_name": "WorkerCustomer",
+            "greeting": "hi",
+        })
+        scheduler._task_queue.put(None)  # 立即结束
+        scheduler._stop_event.clear()
+
+        # 同步跑一次 worker_loop（不起线程，避免 cooldown sleep）
+        with patch("backend.app.services.upstream_scheduler.random.randint", return_value=0):
+            scheduler._worker_loop()
+
+        # 关键断言 ①：_worker_loop 内**不再**直接调 client.report_lead_status
+        assert captured_reports == []
+        # 关键断言 ②：outbox 入队成功，等守护线程异步 flush
+        pending = store.list_pending_lead_status_reports(10)
+        assert len(pending) == 1
+        assert pending[0]["job_id"] == "job_w1"
+        assert pending[0]["upstream_status"] == "REAL_SENT"
+        assert pending[0]["remark"] == "138=WorkerCustomer"
+
+        # ③ 异步 flush 后才真正调用 client.report_lead_status
+        scheduler._report_lead_status_once()
+        assert len(captured_reports) == 1
+        assert captured_reports[0][1][0] == "lead_w1"
+        assert store.list_pending_lead_status_reports(10) == []
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()

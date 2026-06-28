@@ -35,7 +35,7 @@ class TestFriendAcceptanceService(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_check_lead_marks_accepted_when_ocr_matches_friend_state(self):
-        self._create_lead('lead_accept', LeadStatus.WECHAT_ADD_REQUESTED)
+        self._create_lead('lead_accept', LeadStatus.WECHAT_ADD_REQUESTED, acceptance_attempts=3)
 
         def checker(phone: str, **kwargs):
             return FriendAcceptanceCheckResult(
@@ -57,6 +57,7 @@ class TestFriendAcceptanceService(unittest.TestCase):
             self.store.get_lead('lead_accept')['status'],
             LeadStatus.WECHAT_ACCEPTED.value,
         )
+        self.assertEqual(self.store.get_lead('lead_accept')['acceptance_attempts'], 3)
         reports = self.store.list_friend_check_reports()
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]['lead_id'], 'lead_accept')
@@ -91,6 +92,75 @@ class TestFriendAcceptanceService(unittest.TestCase):
             self.audit.record.call_args.args[0],
             'wechat.friend.acceptance_checked',
         )
+        self.assertEqual(self.store.get_lead('lead_pending')['acceptance_attempts'], 1)
+
+    def test_check_lead_exhausts_after_max_attempts(self):
+        self._create_lead(
+            'lead_exhausted',
+            LeadStatus.WECHAT_ADD_REQUESTED,
+            acceptance_attempts=11,
+        )
+
+        def checker(phone: str, **kwargs):
+            return FriendAcceptanceCheckResult(phone=phone, accepted=False, state='PENDING')
+
+        service = FriendAcceptanceService(self.store, self.audit, checker=checker, max_attempts=12)
+
+        service.check_lead('lead_exhausted')
+
+        lead = self.store.get_lead('lead_exhausted')
+        self.assertEqual(lead['acceptance_attempts'], 12)
+        self.assertEqual(lead['status'], LeadStatus.WECHAT_ACCEPTANCE_EXHAUSTED.value)
+        reports = self.store.list_pending_lead_status_reports(10)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]['upstream_status'], 'BIZ_ACCEPTANCE_EXHAUSTED')
+
+    def test_check_lead_risk_control_updates_status_and_notifies_scheduler(self):
+        self._create_lead('lead_risk', LeadStatus.WECHAT_ADD_REQUESTED, acceptance_attempts=3)
+        risk_handler = MagicMock()
+
+        def checker(phone: str, **kwargs):
+            return FriendAcceptanceCheckResult(
+                phone=phone,
+                accepted=False,
+                state='RISK_CONTROL',
+                matched_text='操作频繁',
+            )
+
+        service = FriendAcceptanceService(
+            self.store,
+            self.audit,
+            checker=checker,
+            risk_event_handler=risk_handler,
+        )
+
+        service.check_lead('lead_risk')
+
+        lead = self.store.get_lead('lead_risk')
+        self.assertEqual(lead['acceptance_attempts'], 4)
+        self.assertEqual(lead['status'], LeadStatus.WECHAT_RISK_CONTROL.value)
+        risk_handler.assert_called_once_with(reason='BIZ_RISK_CONTROL')
+        lead_reports = self.store.list_pending_lead_status_reports(10)
+        self.assertEqual(lead_reports[0]['upstream_status'], 'BIZ_RISK_CONTROL')
+        friend_reports = self.store.list_friend_check_reports()
+        self.assertFalse(friend_reports[0]['is_friend'])
+
+    def test_check_lead_target_not_found_updates_status_and_reports(self):
+        self._create_lead('lead_missing', LeadStatus.WECHAT_ADD_REQUESTED)
+
+        def checker(phone: str, **kwargs):
+            return FriendAcceptanceCheckResult(phone=phone, accepted=False, state='TARGET_NOT_FOUND')
+
+        service = FriendAcceptanceService(self.store, self.audit, checker=checker)
+
+        service.check_lead('lead_missing')
+
+        self.assertEqual(
+            self.store.get_lead('lead_missing')['status'],
+            LeadStatus.WECHAT_TARGET_NOT_FOUND.value,
+        )
+        reports = self.store.list_pending_lead_status_reports(10)
+        self.assertEqual(reports[0]['upstream_status'], 'BIZ_TARGET_NOT_FOUND')
 
     def test_check_pending_only_scans_waiting_add_requests(self):
         self._create_lead('lead_pending', LeadStatus.WECHAT_ADD_REQUESTED)
@@ -124,7 +194,13 @@ class TestFriendAcceptanceService(unittest.TestCase):
 
         self.assertEqual(context.exception.detail['code'], 'WECHAT_NOT_FOUND')
 
-    def _create_lead(self, lead_id: str, status: LeadStatus) -> None:
+    def _create_lead(
+        self,
+        lead_id: str,
+        status: LeadStatus,
+        *,
+        acceptance_attempts: int = 0,
+    ) -> None:
         self.store.create_lead(
             {
                 'lead_id': lead_id,
@@ -133,6 +209,7 @@ class TestFriendAcceptanceService(unittest.TestCase):
                 'phone': '18325661362',
                 'sales_id': 'sales_demo_001',
                 'status': status.value,
+                'acceptance_attempts': acceptance_attempts,
                 'created_at': '2026-06-24T00:00:00+00:00',
                 'updated_at': '2026-06-24T00:00:00+00:00',
             }

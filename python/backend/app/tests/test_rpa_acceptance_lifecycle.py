@@ -76,7 +76,7 @@ class TestRpaAcceptanceLifecycle(unittest.TestCase):
             )
 
         self.assertEqual(response["status"], "REAL_QUEUED")
-        created_job = store.create_job.call_args.args[0]
+        created_job = store.create_job_if_lead_idle.call_args.args[0]
         self.assertEqual(created_job["rpa_mode"], "real")
         self.assertFalse(created_job["human_approval"])
 
@@ -225,6 +225,68 @@ class TestRpaAcceptanceLifecycle(unittest.TestCase):
         store.get_job.return_value = job
         store.get_lead.return_value = lead
         return RpaOrchestrator(store, audit, settings), store, audit
+
+
+# ----- Cycle 1 新增：per-lead 互斥 -----
+
+class TestPerLeadMutualExclusion(unittest.TestCase):
+    """add_wechat 入口必须用 create_job_if_lead_idle 原子去重，
+    第二次同 lead 请求要抛 RPA_LEAD_BUSY (HTTP 409)。"""
+
+    def _make_orchestrator(self):
+        from backend.app.core.errors import AppError
+        store = MagicMock()
+        audit = MagicMock()
+        settings = MagicMock()
+        settings.rpa_mode = "real"
+        settings.rpa_daily_limit = 3
+        settings.rpa_require_human_approval = False
+        store.get_daily_count.return_value = 0
+        store.get_lead.return_value = {
+            "lead_id": "lead_busy",
+            "phone": "13800001111",
+            "sales_id": "upstream",
+            "customer_consent": 1,
+            "sales_confirmed_call": 1,
+            "consent_evidence": "upstream",
+        }
+        return RpaOrchestrator(store, audit, settings), store, audit, AppError
+
+    def test_add_wechat_rejects_when_lead_busy(self):
+        from backend.app.storage.sqlite_store import LeadBusyError
+        rpa, store, audit, AppError = self._make_orchestrator()
+        store.create_job_if_lead_idle.side_effect = LeadBusyError("lead_busy", "job_prev", "REAL_RUNNING")
+
+        with patch("backend.app.services.rpa_orchestrator.run_background"):
+            with self.assertRaises(AppError) as ctx:
+                rpa.add_wechat(
+                    lead_id="lead_busy",
+                    greeting="hello",
+                    dry_run=False,
+                    human_approval=False,
+                )
+
+        assert ctx.exception.detail["code"] == "RPA_LEAD_BUSY"
+        assert ctx.exception.status_code == 409
+        event_names = [call.args[0] for call in audit.record.call_args_list]
+        assert "rpa.blocked.lead_busy" in event_names
+
+    def test_add_wechat_calls_create_job_if_lead_idle_with_busy_statuses(self):
+        rpa, store, _audit, _AppError = self._make_orchestrator()
+
+        with patch("backend.app.services.rpa_orchestrator.run_background"):
+            rpa.add_wechat(
+                lead_id="lead_busy",
+                greeting="hi",
+                dry_run=False,
+                human_approval=False,
+            )
+
+        called_job, busy_statuses = store.create_job_if_lead_idle.call_args.args
+        assert called_job["lead_id"] == "lead_busy"
+        assert set(busy_statuses) == {
+            "REAL_QUEUED", "REAL_RUNNING", "SIMULATION_QUEUED", "SIMULATION_RUNNING",
+        }
 
 
 if __name__ == "__main__":

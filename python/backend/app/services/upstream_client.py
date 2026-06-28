@@ -1,7 +1,7 @@
 import abc
 import threading
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 class UpstreamClientInterface(abc.ABC):
@@ -80,13 +80,25 @@ class MockUpstreamClient(UpstreamClientInterface):
 
 
 class RealUpstreamClient(UpstreamClientInterface):
+    """对接真实上游 HTTP。所有鉴权调用走 `_call_with_relogin` 包装：
+    收到 401 时单点重新 login，并用新 token 重试一次；并发场景由
+    `_login_lock + _token_version` 保证只触发一次实际 login()。"""
+
     def __init__(self, api_url: str, client_id: str, client_secret: str):
         self.api_url = api_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
         self.token: Optional[str] = None
+        self._login_lock = threading.Lock()
+        # 每次成功 login() 自增，用来识别"我看到的 token 是否已被别的线程换过"
+        self._token_version = 0
 
     def login(self) -> bool:
+        with self._login_lock:
+            return self._login_locked()
+
+    def _login_locked(self) -> bool:
+        """实际登录逻辑，调用方必须已持有 self._login_lock。成功时刷新 self.token 与 token 版本号。"""
         try:
             r = httpx.post(
                 f"{self.api_url}/login",
@@ -95,6 +107,7 @@ class RealUpstreamClient(UpstreamClientInterface):
             )
             if r.status_code == 200:
                 self.token = r.json().get("access_token")
+                self._token_version += 1
                 return True
         except Exception as e:
             print(f"[Real Upstream] Login error: {e}")
@@ -103,66 +116,101 @@ class RealUpstreamClient(UpstreamClientInterface):
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
 
-    def send_heartbeat(self, status: str, wechat_online: bool, net_info: dict) -> bool:
+    def _call_with_relogin(self, do_request: Callable[[], httpx.Response]) -> Optional[httpx.Response]:
+        """统一包装：执行 do_request；若 401 则在锁内尝试 login() 一次，然后用新 token
+        重试一次。do_request 内部必须每次都重新 self._headers() 取最新 token，
+        否则续签后无法生效。"""
+        token_version_at_entry = self._token_version
         try:
-            payload = {
-                "client_id": self.client_id,
-                "status": status,
-                "wechat_online": wechat_online,
-                **net_info,
-            }
-            r = httpx.post(
+            resp = do_request()
+        except Exception as exc:
+            print(f"[Real Upstream] HTTP error: {exc}")
+            return None
+        if resp.status_code != 401:
+            return resp
+
+        # 401 → 尝试续签。若同期已有其他线程续签过（token_version 变了），就跳过实际登录直接重试。
+        relogin_ok = True
+        with self._login_lock:
+            if self._token_version == token_version_at_entry:
+                relogin_ok = self._login_locked()
+                if not relogin_ok:
+                    print("[Real Upstream] ⚠️ 上游 token 续签失败，请检查 client_id/secret")
+        if not relogin_ok:
+            return resp
+
+        try:
+            return do_request()
+        except Exception as exc:
+            print(f"[Real Upstream] HTTP retry error: {exc}")
+            return None
+
+    def send_heartbeat(self, status: str, wechat_online: bool, net_info: dict) -> bool:
+        payload = {
+            "client_id": self.client_id,
+            "status": status,
+            "wechat_online": wechat_online,
+            **net_info,
+        }
+
+        def _do() -> httpx.Response:
+            return httpx.post(
                 f"{self.api_url}/heartbeat",
                 json=payload,
                 headers=self._headers(),
                 timeout=10.0,
             )
-            return r.status_code == 200
-        except Exception:
-            return False
+
+        resp = self._call_with_relogin(_do)
+        return resp is not None and resp.status_code == 200
 
     def fetch_leads(self) -> List[Dict[str, Any]]:
-        try:
-            r = httpx.get(
+        def _do() -> httpx.Response:
+            return httpx.get(
                 f"{self.api_url}/leads/pending",
                 headers=self._headers(),
                 timeout=10.0,
             )
-            if r.status_code == 200:
-                return r.json()
-        except Exception:
-            pass
+
+        resp = self._call_with_relogin(_do)
+        if resp is not None and resp.status_code == 200:
+            try:
+                return resp.json()
+            except Exception:
+                pass
         return []
 
     def report_lead_status(
         self, lead_id: str, status: str, remark: Optional[str], error_details: Optional[str]
     ) -> bool:
-        try:
-            payload = {
-                "lead_id": lead_id,
-                "status": status,
-                "remark": remark,
-                "error_details": error_details,
-            }
-            r = httpx.post(
+        payload = {
+            "lead_id": lead_id,
+            "status": status,
+            "remark": remark,
+            "error_details": error_details,
+        }
+
+        def _do() -> httpx.Response:
+            return httpx.post(
                 f"{self.api_url}/leads/report",
                 json=payload,
                 headers=self._headers(),
                 timeout=10.0,
             )
-            return r.status_code == 200
-        except Exception:
-            return False
+
+        resp = self._call_with_relogin(_do)
+        return resp is not None and resp.status_code == 200
 
     def report_friend_check(self, lead_id: str, is_friend: bool) -> bool:
-        try:
-            payload = {"lead_id": lead_id, "is_friend": is_friend}
-            r = httpx.post(
+        payload = {"lead_id": lead_id, "is_friend": is_friend}
+
+        def _do() -> httpx.Response:
+            return httpx.post(
                 f"{self.api_url}/leads/friend-check",
                 json=payload,
                 headers=self._headers(),
                 timeout=10.0,
             )
-            return r.status_code == 200
-        except Exception:
-            return False
+
+        resp = self._call_with_relogin(_do)
+        return resp is not None and resp.status_code == 200

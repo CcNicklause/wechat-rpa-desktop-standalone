@@ -42,17 +42,29 @@ def get_config(store: SQLiteStore = Depends(get_store)):
     return store.get_upstream_config()
 
 
+@router.post("/dev/scheduler/unfreeze")
+def dev_scheduler_unfreeze(scheduler=Depends(get_scheduler)):
+    if not scheduler:
+        raise HTTPException(status_code=400, detail="Scheduler not ready")
+    was_frozen = scheduler.unfreeze(reason="dev_api")
+    return {
+        "unfrozen": was_frozen,
+        "state": scheduler._compute_status_state(),
+    }
+
+
 @router.get("/status")
 def get_status(scheduler=Depends(get_scheduler)):
     if not scheduler:
-        return {"scheduler_alive": False, "wechat_online": False, "state": "IDLE", "queue_remaining": 0}
+        return {"scheduler_alive": False, "wechat_online": False, "state": "IDLE", "queue_remaining": 0, "frozen_remaining_seconds": 0}
 
     from backend.app.services.upstream_scheduler import _get_weixin_pids
     return {
         "scheduler_alive": scheduler.is_alive(),
         "wechat_online": len(_get_weixin_pids()) > 0,
-        "state": scheduler.status_state,
+        "state": scheduler._compute_status_state(),
         "queue_remaining": scheduler._task_queue.qsize(),
+        "frozen_remaining_seconds": scheduler.get_frozen_remaining_seconds(),
     }
 
 
@@ -77,6 +89,21 @@ def trigger_friend_check_report(scheduler=Depends(get_scheduler)):
     if not scheduler:
         raise HTTPException(status_code=400, detail="Scheduler not ready")
     return scheduler.trigger_friend_check_report_now()
+
+
+@router.post("/dev/trigger-lead-status-report")
+def trigger_lead_status_report(scheduler=Depends(get_scheduler)):
+    if not scheduler:
+        raise HTTPException(status_code=400, detail="Scheduler not ready")
+    return scheduler.trigger_lead_status_report_now()
+
+
+@router.get("/dev/lead-status-reports")
+def get_lead_status_reports(limit: int = 100, store: SQLiteStore = Depends(get_store)):
+    """开发用：直接读 lead_status_reports outbox，便于排查发送失败的上报。"""
+    return {
+        "outbox": store.list_pending_lead_status_reports(limit),
+    }
 
 
 @router.post("/dev/clear-queue")

@@ -34,4 +34,13 @@ def get_rpa_orchestrator(
     audit: AuditLogger = Depends(get_audit_logger),
     settings: Settings = Depends(get_settings),
 ) -> RpaOrchestrator:
-    return RpaOrchestrator(store, audit, settings)
+    # 通过 routes.upstream.global_scheduler 拿到 scheduler 单例的 notify_risk_event，
+    # 把"HTTP 直接发起的 add-wechat 路径"也接入 RISK_FROZEN 联动。
+    # 本模块在 import 时不能直接 import upstream（避免循环依赖），延迟到调用时取。
+    from backend.app.api.routes import upstream as upstream_routes
+
+    risk_handler = None
+    if upstream_routes.global_scheduler is not None:
+        risk_handler = upstream_routes.global_scheduler.notify_risk_event
+
+    return RpaOrchestrator(store, audit, settings, risk_event_handler=risk_handler)
