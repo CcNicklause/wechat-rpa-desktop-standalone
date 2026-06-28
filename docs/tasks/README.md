@@ -29,6 +29,7 @@
 | 任务线 | 状态 | 说明 | 入口 |
 |---|---|---|---|
 | `rpa-hardening` | DONE | RPA 加微链路 P0/P1 加固，103 个后端测试通过 | [state.md](rpa-hardening/state.md) |
+| `login-system` | IMPLEMENTED | P0 真实登录与 session 恢复已落地；终端心跳后续推进 | [state.md](login-system/state.md) |
 
 ## 可选任务线示例
 

@@ -50,13 +50,11 @@ export function AccountManagement() {
     defaultValues: { oldPassword: '', newPassword: '', confirmPassword: '' },
   });
 
-  const onSubmit = async (data: PasswordFormValues) => {
-    // Simulate API change password
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  const onSubmit = async (_data: PasswordFormValues) => {
     toast({
-      title: '修改密码成功',
-      description: '登录席位密码已安全修改',
-      variant: 'success',
+      title: '请前往 Web Portal',
+      description: '桌面端当前只负责登录，不直接修改 Portal 账号密码',
+      variant: 'default',
     });
     reset();
   };
@@ -76,7 +74,15 @@ export function AccountManagement() {
           <CardContent className="p-0 pt-4 space-y-4 text-xs">
             <div className="flex justify-between border-b pb-2">
               <span className="text-muted-foreground">当前席位名称</span>
-              <span className="font-semibold">{user?.username || 'Guest'}</span>
+              <span className="font-semibold">{user?.name || user?.phone || 'Guest'}</span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-muted-foreground">Portal 手机号</span>
+              <span className="font-semibold">{user?.phone || '-'}</span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-muted-foreground">租户 ID</span>
+              <span className="font-semibold">{user?.tenant_id ?? '-'}</span>
             </div>
             <div className="flex justify-between border-b pb-2">
               <span className="text-muted-foreground">权限级别</span>

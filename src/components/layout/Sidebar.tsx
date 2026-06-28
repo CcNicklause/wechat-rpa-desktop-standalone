@@ -37,7 +37,7 @@ export function Sidebar({
             <h2 className="text-sm font-bold text-foreground tracking-wide">WeChat RPA</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[10px] text-muted-foreground font-semibold">
-                {user?.username || 'Guest'}
+                {user?.name || user?.phone || 'Guest'}
               </span>
               <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 leading-none shrink-0">
                 {user?.role || 'agent'}
