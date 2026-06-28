@@ -3,6 +3,9 @@ import { useUpstreamStore } from '@/stores/useUpstreamStore';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 export function UpstreamConfig() {
   const {
@@ -38,15 +41,6 @@ export function UpstreamConfig() {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  const stateBadgeVariant = (s: string) => {
-    switch (s) {
-      case 'IDLE': return 'success' as const;
-      case 'BUSY': return 'pending' as const;
-      case 'COOLDOWN': return 'secondary' as const;
-      default: return 'outline' as const;
-    }
-  };
-
   const stateLabel = (s: string) => {
     switch (s) {
       case 'IDLE': return 'IDLE 空闲';
@@ -74,38 +68,38 @@ export function UpstreamConfig() {
             <div className="space-y-2">
               <span className="text-xs font-semibold text-muted-foreground">运行模式</span>
               <div className="flex items-center gap-6">
-                <label className="flex items-center gap-2 cursor-pointer">
+                <Label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="upstream_mode"
                     value="mock"
                     checked={config.upstream_mode === 'mock'}
                     onChange={() => saveConfig({ upstream_mode: 'mock' })}
-                    className="accent-primary"
+                    className="h-4 w-4 accent-primary"
                   />
                   <span className="text-xs">Mock 本地模拟模式</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                </Label>
+                <Label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="upstream_mode"
                     value="real"
                     checked={config.upstream_mode === 'real'}
                     onChange={() => saveConfig({ upstream_mode: 'real' })}
-                    className="accent-primary"
+                    className="h-4 w-4 accent-primary"
                   />
                   <span className="text-xs">Real 真实网络模式</span>
-                </label>
+                </Label>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <span className="text-xs font-semibold text-muted-foreground">上游 API URL</span>
-              <input
+              <Input
                 type="text"
                 defaultValue={config.upstream_api_url}
                 onBlur={(e) => saveConfig({ upstream_api_url: e.target.value })}
-                className="w-full px-3 py-2 bg-transparent border border-input text-foreground rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
+                className="h-9 text-sm"
                 placeholder="http://localhost:8000/api/v1/upstream"
               />
             </div>
@@ -113,21 +107,19 @@ export function UpstreamConfig() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <span className="text-xs font-semibold text-muted-foreground">Client ID</span>
-                <input
+                <Input
                   type="text"
                   defaultValue={config.client_id}
                   onBlur={(e) => saveConfig({ client_id: e.target.value })}
-                  className="w-full px-3 py-2 bg-transparent border border-input text-foreground rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                   placeholder="client-001"
                 />
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-semibold text-muted-foreground">Client Secret</span>
-                <input
+                <Input
                   type="password"
                   defaultValue={config.client_secret}
                   onBlur={(e) => saveConfig({ client_secret: e.target.value })}
-                  className="w-full px-3 py-2 bg-transparent border border-input text-foreground rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                   placeholder="••••••••••••"
                 />
               </div>
@@ -157,9 +149,7 @@ export function UpstreamConfig() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">调度器工作状态</span>
-              <Badge variant={stateBadgeVariant(status.state)} className="text-[10px]">
-                {stateLabel(status.state)}
-              </Badge>
+              <StatusBadge status={status.state} label={stateLabel(status.state)} className="text-[10px]" />
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">队列任务数</span>

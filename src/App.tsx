@@ -8,6 +8,9 @@ import { AppShell } from "./components/layout/AppShell";
 import { StatusBar } from "./components/layout/StatusBar";
 import { Card } from "./components/ui/card";
 import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
+import { FieldError } from "./components/common/FieldError";
 import { ToastContainer } from "./components/ui/toast";
 import { useToast } from "./hooks/useToast";
 import { useTheme } from "./hooks/useTheme";
@@ -88,37 +91,29 @@ export default function App() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground">
+              <Label className="font-bold">
                 管理账号
-              </label>
-              <input
+              </Label>
+              <Input
                 type="text"
                 {...register("username")}
-                className="w-full px-3 py-2 bg-transparent border border-input text-foreground rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
+                className="h-9 text-sm"
                 placeholder="请输入用户名"
               />
-              {errors.username && (
-                <p className="text-[11px] text-rose-500 font-semibold">
-                  {errors.username.message}
-                </p>
-              )}
+              <FieldError className="text-[11px]">{errors.username?.message}</FieldError>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground">
+              <Label className="font-bold">
                 访问密码
-              </label>
-              <input
+              </Label>
+              <Input
                 type="password"
                 {...register("password")}
-                className="w-full px-3 py-2 bg-transparent border border-input text-foreground rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
+                className="h-9 text-sm"
                 placeholder="••••••"
               />
-              {errors.password && (
-                <p className="text-[11px] text-rose-500 font-semibold">
-                  {errors.password.message}
-                </p>
-              )}
+              <FieldError className="text-[11px]">{errors.password?.message}</FieldError>
             </div>
 
             <Button

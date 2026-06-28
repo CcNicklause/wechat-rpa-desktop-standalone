@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { invoke } from '@tauri-apps/api/core';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { FieldError } from '@/components/common/FieldError';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToast } from '@/hooks/useToast';
 
@@ -103,31 +106,28 @@ export function AccountManagement() {
           <CardContent className="p-0 pt-4">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-xs">
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">旧密码</label>
-                <input
+                <Label>旧密码</Label>
+                <Input
                   type="password"
                   {...register('oldPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.oldPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.oldPassword.message}</p>}
+                <FieldError>{errors.oldPassword?.message}</FieldError>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">新密码</label>
-                <input
+                <Label>新密码</Label>
+                <Input
                   type="password"
                   {...register('newPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.newPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.newPassword.message}</p>}
+                <FieldError>{errors.newPassword?.message}</FieldError>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">确认新密码</label>
-                <input
+                <Label>确认新密码</Label>
+                <Input
                   type="password"
                   {...register('confirmPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.confirmPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.confirmPassword.message}</p>}
+                <FieldError>{errors.confirmPassword?.message}</FieldError>
               </div>
               <Button type="submit" className="w-full h-8" disabled={isSubmitting}>
                 保存修改

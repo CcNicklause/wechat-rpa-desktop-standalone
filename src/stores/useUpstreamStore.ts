@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { requestLocalApi } from '@/lib/api';
 
 export interface UpstreamConfig {
   upstream_mode: 'mock' | 'real';
@@ -31,8 +32,6 @@ interface UpstreamStoreState {
   clearLogs(): void;
 }
 
-const BACKEND_URL = 'http://127.0.0.1:8000/api/v1/upstream';
-
 export const useUpstreamStore = create<UpstreamStoreState>((set, get) => ({
   config: {
     upstream_mode: 'mock',
@@ -51,11 +50,8 @@ export const useUpstreamStore = create<UpstreamStoreState>((set, get) => ({
 
   fetchConfig: async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/config`);
-      if (res.ok) {
-        const data = await res.json();
-        set({ config: { ...get().config, ...data } });
-      }
+      const data = await requestLocalApi<Partial<UpstreamConfig>>('/api/v1/upstream/config');
+      set({ config: { ...get().config, ...data } });
     } catch (e) {
       console.error(e);
     }
@@ -65,18 +61,14 @@ export const useUpstreamStore = create<UpstreamStoreState>((set, get) => ({
     set({ isConnecting: true });
     try {
       const body = { ...get().config, ...cfg };
-      const res = await fetch(`${BACKEND_URL}/config`, {
+      const data = await requestLocalApi<{ scheduler_alive: boolean }>('/api/v1/upstream/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (res.ok) {
-        const data = await res.json();
-        set({
-          config: body,
-          status: { ...get().status, scheduler_alive: data.scheduler_alive },
-        });
-      }
+      set({
+        config: body,
+        status: { ...get().status, scheduler_alive: data.scheduler_alive },
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -86,26 +78,23 @@ export const useUpstreamStore = create<UpstreamStoreState>((set, get) => ({
 
   fetchStatus: async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/status`);
-      if (res.ok) {
-        const data = await res.json();
-        set({ status: data });
-      }
+      const data = await requestLocalApi<UpstreamStatus>('/api/v1/upstream/status');
+      set({ status: data });
     } catch (e) {
       // 后端未启动时静默失败
     }
   },
 
   triggerFetch: async () => {
-    await fetch(`${BACKEND_URL}/dev/trigger-fetch`, { method: 'POST' });
+    await requestLocalApi('/api/v1/upstream/dev/trigger-fetch', { method: 'POST' });
   },
 
   triggerHeartbeat: async () => {
-    await fetch(`${BACKEND_URL}/dev/trigger-heartbeat`, { method: 'POST' });
+    await requestLocalApi('/api/v1/upstream/dev/trigger-heartbeat', { method: 'POST' });
   },
 
   clearQueue: async () => {
-    await fetch(`${BACKEND_URL}/dev/clear-queue`, { method: 'POST' });
+    await requestLocalApi('/api/v1/upstream/dev/clear-queue', { method: 'POST' });
   },
 
   addLog: (log) =>

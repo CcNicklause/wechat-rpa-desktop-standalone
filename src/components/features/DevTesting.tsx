@@ -6,6 +6,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { FieldError } from '@/components/common/FieldError';
+import { EmptyState } from '@/components/common/EmptyState';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { useDevTestStore } from '@/stores/useDevTestStore';
@@ -513,33 +520,33 @@ export function DevTesting() {
                 key={index}
                 className="grid grid-cols-[1.2fr_1fr_1fr_1.5fr_auto] gap-2 items-start"
               >
-                <input
+                <Input
                   type="text"
                   value={row.lead_id}
                   onChange={(e) => updateBatchRow(index, { lead_id: e.target.value })}
                   placeholder="dev_mock_..."
-                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                  className="h-7 px-2 py-1"
                 />
-                <input
+                <Input
                   type="text"
                   value={row.phone}
                   onChange={(e) => updateBatchRow(index, { phone: e.target.value })}
                   placeholder="138..."
-                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                  className="h-7 px-2 py-1"
                 />
-                <input
+                <Input
                   type="text"
                   value={row.customer_name}
                   onChange={(e) => updateBatchRow(index, { customer_name: e.target.value })}
                   placeholder="测试用户"
-                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                  className="h-7 px-2 py-1"
                 />
-                <input
+                <Input
                   type="text"
                   value={row.greeting}
                   onChange={(e) => updateBatchRow(index, { greeting: e.target.value })}
                   placeholder="验证语"
-                  className="px-2 py-1 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
+                  className="h-7 px-2 py-1"
                 />
                 <Button
                   type="button"
@@ -598,36 +605,33 @@ export function DevTesting() {
             className="space-y-4 text-xs"
           >
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">测试手机号 / 微信号</label>
-              <input
+              <Label>测试手机号 / 微信号</Label>
+              <Input
                 type="text"
                 {...register('phone')}
                 placeholder="请输入手机号或者微信号"
-                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               />
-              {errors.phone && <p className="text-[10px] text-rose-500 font-semibold">{errors.phone.message}</p>}
+              {errors.phone && <FieldError>{errors.phone.message}</FieldError>}
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">常用验证模板预设</label>
-              <select
+              <Label>常用验证模板预设</Label>
+              <Select
                 onChange={(e) => handleSelectTemplate(e.target.value)}
-                className="w-full px-3 py-1.5 bg-background border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               >
                 {TEMPLATES.map((t, idx) => (
                   <option key={idx} value={t.text}>{t.title}</option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">验证语设置</label>
-              <textarea
+              <Label>验证语设置</Label>
+              <Textarea
                 {...register('greeting')}
                 rows={3}
-                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               />
-              {errors.greeting && <p className="text-[10px] text-rose-500 font-semibold">{errors.greeting.message}</p>}
+              {errors.greeting && <FieldError>{errors.greeting.message}</FieldError>}
             </div>
 
             <div className="flex justify-between items-center border border-border p-3 bg-muted/20 rounded-xl">
@@ -677,11 +681,12 @@ export function DevTesting() {
               onComplete={markFinished}
             />
           ) : (
-            <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
-              <span className="text-3xl block">🔬</span>
-              <p className="text-xs">暂无测试进程运行</p>
-              <p className="text-[10px]">配置左侧参数后点击"立即执行加友测试"即可捕获并监听本地指令</p>
-            </div>
+            <EmptyState
+              variant="fill"
+              icon="🔬"
+              title="暂无测试进程运行"
+              description={'配置左侧参数后点击"立即执行加友测试"即可捕获并监听本地指令'}
+            />
           )}
         </Card>
 
@@ -735,23 +740,23 @@ export function DevTesting() {
 
           <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
             <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-muted-foreground">已是好友账号</label>
-              <input
+              <Label className="text-[10px]">已是好友账号</Label>
+              <Input
                 type="text"
                 value={manualFriendAccount}
                 onChange={(e) => setManualFriendAccount(e.target.value)}
                 placeholder="输入微信号/手机号"
-                className="w-full px-2 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-[11px] text-foreground"
+                className="h-7 px-2 py-1.5 text-[11px]"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-semibold text-muted-foreground">账号昵称</label>
-              <input
+              <Label className="text-[10px]">账号昵称</Label>
+              <Input
                 type="text"
                 value={manualFriendName}
                 onChange={(e) => setManualFriendName(e.target.value)}
                 placeholder="例如：张三"
-                className="w-full px-2 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-[11px] text-foreground"
+                className="h-7 px-2 py-1.5 text-[11px]"
               />
             </div>
             <Button
@@ -824,9 +829,13 @@ export function DevTesting() {
                       </span>
                       <span className="text-muted-foreground font-mono"> · {report.lead_id}</span>
                     </span>
-                    <span className={report.status === 'SENT' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>
+                    <Badge
+                      variant={report.status === 'SENT' ? 'success' : report.status === 'FAILED' ? 'failed' : 'pending'}
+                      showDot
+                      className="shrink-0 text-[10px]"
+                    >
                       {report.status}
-                    </span>
+                    </Badge>
                   </div>
                 ))}
               </div>
@@ -876,18 +885,17 @@ function AuditEventList({
 }) {
   if (!leadId) {
     return (
-      <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
-        <span className="text-3xl block">🗂️</span>
-        <p className="text-xs">暂无审计事件</p>
-        <p className="text-[10px]">执行测试后会按 lead_id 拉取本次测试相关的审计流</p>
-      </div>
+      <EmptyState
+        variant="fill"
+        icon="🗂️"
+        title="暂无审计事件"
+        description="执行测试后会按 lead_id 拉取本次测试相关的审计流"
+      />
     );
   }
 
   if (error) {
-    return (
-      <p className="text-[11px] text-rose-500 font-semibold">❌ {error.message}</p>
-    );
+    return <FieldError className="text-[11px]">❌ {error.message}</FieldError>;
   }
 
   if (isLoading && events.length === 0) {
@@ -929,18 +937,18 @@ function AuditEventList({
 }
 
 function MetaPill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'fail' }) {
-  const toneClass =
+  const variant =
     tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-600'
+      ? 'success'
       : tone === 'warn'
-        ? 'bg-amber-500/15 text-amber-600'
+        ? 'pending'
         : tone === 'fail'
-          ? 'bg-rose-500/15 text-rose-600'
-          : 'bg-muted text-muted-foreground';
+          ? 'failed'
+          : 'secondary';
   return (
-    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${toneClass}`}>
+    <Badge variant={variant} className="px-1.5 py-0.5 text-[10px]">
       {children}
-    </span>
+    </Badge>
   );
 }
 

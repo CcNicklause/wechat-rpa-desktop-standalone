@@ -32,8 +32,12 @@ __pycache__/
 *.pyc
 python/backend/data/*.db
 python/backend/data/*.jsonl
+python/backend/data/*.png
 python/backend/data/templates_cache/
 python/backend/scratch/
+
+# Claude Code session artifacts
+.claude/
 
 # Tauri
 src-tauri/target/

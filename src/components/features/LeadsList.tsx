@@ -1,6 +1,8 @@
 import { Card, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { EmptyState } from '@/components/common/EmptyState';
 import { Lead } from '@/hooks/useLeads';
 
 interface LeadsListProps {
@@ -26,18 +28,7 @@ export function LeadsList({ leads, onTriggerJob }: LeadsListProps) {
               <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
             </div>
             <div className="flex items-center gap-4">
-              <Badge
-                variant={
-                  lead.status === 'success' || lead.status === 'completed'
-                    ? 'success'
-                    : lead.status === 'failed'
-                    ? 'failed'
-                    : 'pending'
-                }
-                showDot
-              >
-                {lead.status}
-              </Badge>
+              <StatusBadge status={lead.status} showDot />
               <Button
                 size="sm"
                 variant="outline"
@@ -49,11 +40,11 @@ export function LeadsList({ leads, onTriggerJob }: LeadsListProps) {
           </div>
         ))}
         {leads.length === 0 && (
-          <div className="text-center py-16 space-y-2">
-            <span className="text-3xl block animate-bounce">📥</span>
-            <p className="text-xs text-muted-foreground">暂无本地线索</p>
-            <p className="text-[10px] text-muted-foreground">系统正同步本地引擎数据，您可在“开发测试”中发起人工模拟测试线索</p>
-          </div>
+          <EmptyState
+            icon={<span className="animate-bounce inline-block">📥</span>}
+            title="暂无本地线索"
+            description="系统正同步本地引擎数据，您可在“开发测试”中发起人工模拟测试线索"
+          />
         )}
       </div>
     </Card>
