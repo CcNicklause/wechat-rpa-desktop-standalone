@@ -27,7 +27,9 @@ class MockUpstreamClient(UpstreamClientInterface):
     def __init__(self):
         self.token = None
         self._pending_leads: List[Dict[str, Any]] = []
+        self._friend_check_reports: List[Dict[str, Any]] = []
         self._pending_lock = threading.Lock()
+        self._reports_lock = threading.Lock()
 
     def login(self) -> bool:
         self.token = "mock-bearer-token-123456"
@@ -64,8 +66,17 @@ class MockUpstreamClient(UpstreamClientInterface):
         return True
 
     def report_friend_check(self, lead_id: str, is_friend: bool) -> bool:
+        with self._reports_lock:
+            self._friend_check_reports.append({
+                "lead_id": lead_id,
+                "is_friend": bool(is_friend),
+            })
         print(f"[Mock Upstream] 好友对账反馈: {lead_id} -> is_friend={is_friend}")
         return True
+
+    def friend_check_reports(self) -> List[Dict[str, Any]]:
+        with self._reports_lock:
+            return list(self._friend_check_reports)
 
 
 class RealUpstreamClient(UpstreamClientInterface):

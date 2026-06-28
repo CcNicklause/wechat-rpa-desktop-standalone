@@ -57,6 +57,11 @@ class TestFriendAcceptanceService(unittest.TestCase):
             self.store.get_lead('lead_accept')['status'],
             LeadStatus.WECHAT_ACCEPTED.value,
         )
+        reports = self.store.list_friend_check_reports()
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]['lead_id'], 'lead_accept')
+        self.assertTrue(reports[0]['is_friend'])
+        self.assertEqual(reports[0]['status'], 'PENDING')
         self.audit.record.assert_called_once()
         self.assertEqual(self.audit.record.call_args.args[0], 'wechat.friend.accepted')
 

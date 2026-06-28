@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from backend.app.core.config import get_settings
 from backend.app.schemas.lead import LeadStatus
+from backend.app.services.upstream_client import MockUpstreamClient
 from backend.app.storage.sqlite_store import SQLiteStore
 from backend.app.services.upstream_scheduler import UpstreamScheduler, _get_weixin_pids
 
@@ -384,6 +385,33 @@ def test_enqueue_remote_lead_writes_consent_fields():
         assert lead["customer_consent"] == 1
         assert lead["sales_confirmed_call"] == 1
         assert lead["consent_evidence"] == "upstream"
+    finally:
+        scheduler = None
+        store = None
+        gc.collect()
+        tmp_dir.cleanup()
+
+
+def test_friend_check_reports_are_sent_to_mock_upstream():
+    tmp_dir = tempfile.TemporaryDirectory()
+    try:
+        scheduler, store = make_scheduler_for_test(tmp_dir)
+        scheduler.client = MockUpstreamClient()
+        store.enqueue_friend_check_report(
+            "friend_report_lead",
+            True,
+            "2026-06-26T00:00:00+00:00",
+        )
+
+        result = scheduler._report_friend_checks_once()
+
+        reports = store.list_friend_check_reports()
+        assert result["reported"] == 1
+        assert result["failed"] == 0
+        assert reports[0]["status"] == "SENT"
+        assert scheduler.client.friend_check_reports() == [
+            {"lead_id": "friend_report_lead", "is_friend": True}
+        ]
     finally:
         scheduler = None
         store = None

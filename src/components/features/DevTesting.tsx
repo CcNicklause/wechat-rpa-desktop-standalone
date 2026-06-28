@@ -65,6 +65,36 @@ interface AuditEvent {
   message?: string | null;
 }
 
+interface LeadSummary {
+  lead_id: string;
+  customer_name: string;
+  phone_masked: string;
+  status: string;
+}
+
+interface FriendCheckReport {
+  lead_id: string;
+  is_friend: boolean;
+  status: string;
+  attempts: number;
+  last_error?: string | null;
+  updated_at: string;
+  customer_name?: string | null;
+  account?: string | null;
+  lead_status?: string | null;
+}
+
+interface FriendCheckReportsResponse {
+  outbox: FriendCheckReport[];
+  mock_upstream_reports: Array<{
+    lead_id: string;
+    is_friend: boolean;
+    customer_name?: string | null;
+    account?: string | null;
+    lead_status?: string | null;
+  }>;
+}
+
 const TEMPLATES = [
   { title: '模板 1：默认销售加微', text: '您好，我是销售顾问，收到了您的微信申请。' },
   { title: '模板 2：商务合作对接', text: '您好，我是 WeChat RPA 的对接人，想跟您进行商务合作。' },
@@ -77,6 +107,11 @@ export function DevTesting() {
 
   const [batchRows, setBatchRows] = useState<BatchLeadRow[]>([makeDefaultRow(0)]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [simulatingLeadId, setSimulatingLeadId] = useState<string | null>(null);
+  const [flushingReports, setFlushingReports] = useState(false);
+  const [manualFriendAccount, setManualFriendAccount] = useState('');
+  const [manualFriendName, setManualFriendName] = useState('');
+  const [manualSimulating, setManualSimulating] = useState(false);
 
   const updateBatchRow = (index: number, patch: Partial<BatchLeadRow>) => {
     setBatchRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -199,6 +234,119 @@ export function DevTesting() {
         `/api/v1/audit?lead_id=${encodeURIComponent(testLeadId!)}&limit=200`,
       ),
   });
+
+  const leadsQuery = useQuery<LeadSummary[]>({
+    queryKey: ['dev-test-leads'],
+    refetchInterval: 8000,
+    queryFn: () => requestLocalApi<LeadSummary[]>('/api/v1/leads?limit=200'),
+  });
+
+  const friendReportsQuery = useQuery<FriendCheckReportsResponse>({
+    queryKey: ['dev-test-friend-check-reports'],
+    refetchInterval: 8000,
+    queryFn: () =>
+      requestLocalApi<FriendCheckReportsResponse>('/api/v1/upstream/dev/friend-check-reports?limit=100'),
+  });
+
+  const pendingFriendLeads = (leadsQuery.data ?? []).filter(
+    (lead) => lead.status === 'WECHAT_ADD_REQUESTED',
+  );
+
+  const simulateFriendAccepted = async (leadId: string) => {
+    setSimulatingLeadId(leadId);
+    try {
+      await requestLocalApi('/api/v1/friend-acceptance/dev/simulate-accepted', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+      toast({
+        title: '已模拟好友通过',
+        description: `${leadId} 已写入本地好友确认与待上报队列`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-audit', leadId] });
+    } catch (err: any) {
+      toast({
+        title: '模拟好友通过失败',
+        description: err?.message || '请确认线索状态为 WECHAT_ADD_REQUESTED',
+        variant: 'destructive',
+      });
+    } finally {
+      setSimulatingLeadId(null);
+    }
+  };
+
+  const flushFriendReports = async () => {
+    setFlushingReports(true);
+    try {
+      const res = await requestLocalApi<any>('/api/v1/upstream/dev/trigger-friend-check-report', {
+        method: 'POST',
+      });
+      toast({
+        title: '好友对账上报已触发',
+        description: `成功 ${res.reported ?? 0} 条，失败 ${res.failed ?? 0} 条`,
+        variant: (res.failed ?? 0) > 0 ? 'destructive' : 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      toast({
+        title: '触发好友对账上报失败',
+        description: err?.message || '请确认上游调度器已启动',
+        variant: 'destructive',
+      });
+    } finally {
+      setFlushingReports(false);
+    }
+  };
+
+  const simulateManualFriendAccepted = async (flushAfter: boolean) => {
+    const account = manualFriendAccount.trim();
+    if (account.length < 5) {
+      toast({
+        title: '请输入账号',
+        description: '账号至少 5 个字符，用于创建开发测试好友对账线索',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setManualSimulating(true);
+    try {
+      const res = await requestLocalApi<any>('/api/v1/friend-acceptance/dev/simulate-accepted', {
+        method: 'POST',
+        body: JSON.stringify({
+          account,
+          customer_name: manualFriendName.trim() || account,
+        }),
+      });
+      if (flushAfter) {
+        await requestLocalApi('/api/v1/upstream/dev/trigger-friend-check-report', {
+          method: 'POST',
+        });
+      }
+      toast({
+        title: flushAfter ? '已模拟并立即上报' : '已模拟已是好友账号',
+        description: `${res.lead_id || account} 已进入好友对账链路`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      const message = err?.message || '';
+      const endpointMissing = /API Error 404|Not Found/i.test(message);
+      toast({
+        title: '手动账号模拟失败',
+        description: endpointMissing
+          ? '后端还没加载新的模拟接口，请重启 Python 后端或重新运行 pnpm tauri dev'
+          : message || '请确认后端和上游调度器已启动',
+        variant: 'destructive',
+      });
+    } finally {
+      setManualSimulating(false);
+    }
+  };
 
   const handleSelectTemplate = (val: string) => {
     setValue('greeting', val, { shouldDirty: true });
@@ -516,6 +664,142 @@ export function DevTesting() {
             isLoading={auditQuery.isLoading}
             error={auditQuery.error as Error | null}
           />
+        </Card>
+
+        <Card className="p-6 border border-border bg-card flex flex-col gap-3">
+          <div className="flex items-center justify-between pb-3 border-b border-border">
+            <h3 className="font-semibold text-xs text-foreground tracking-wider">🤝 好友通过模拟 / 对账</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              className="h-6 px-2 text-[10px]"
+              disabled={flushingReports}
+              onClick={flushFriendReports}
+            >
+              {flushingReports ? '上报中...' : '立即上报'}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold text-muted-foreground">已是好友账号</label>
+              <input
+                type="text"
+                value={manualFriendAccount}
+                onChange={(e) => setManualFriendAccount(e.target.value)}
+                placeholder="输入微信号/手机号"
+                className="w-full px-2 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-[11px] text-foreground"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold text-muted-foreground">账号昵称</label>
+              <input
+                type="text"
+                value={manualFriendName}
+                onChange={(e) => setManualFriendName(e.target.value)}
+                placeholder="例如：张三"
+                className="w-full px-2 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-[11px] text-foreground"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              disabled={manualSimulating}
+              onClick={() => simulateManualFriendAccepted(false)}
+            >
+              {manualSimulating ? '处理中...' : '模拟已是好友'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="default"
+              className="h-7 text-[10px]"
+              disabled={manualSimulating}
+              onClick={() => simulateManualFriendAccepted(true)}
+            >
+              模拟并立即上报测试
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-muted-foreground">待通过线索</p>
+            {pendingFriendLeads.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">暂无 WECHAT_ADD_REQUESTED 线索</p>
+            ) : (
+              pendingFriendLeads.slice(0, 5).map((lead) => (
+                <div
+                  key={lead.lead_id}
+                  className="flex items-center justify-between gap-2 border border-border rounded-lg bg-muted/20 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-foreground truncate">{lead.customer_name}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                      {lead.lead_id} · {lead.phone_masked}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[10px] shrink-0"
+                    disabled={simulatingLeadId === lead.lead_id}
+                    onClick={() => simulateFriendAccepted(lead.lead_id)}
+                  >
+                    {simulatingLeadId === lead.lead_id ? '模拟中' : '模拟已通过'}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-muted-foreground">本地待上报 / 上报结果</p>
+            {(friendReportsQuery.data?.outbox ?? []).length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">暂无好友对账记录</p>
+            ) : (
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                {(friendReportsQuery.data?.outbox ?? []).map((report) => (
+                  <div
+                    key={report.lead_id}
+                    className="flex items-center justify-between gap-2 border border-border rounded-lg px-2 py-1.5 text-[10px]"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="font-semibold text-foreground">
+                        {report.customer_name || report.account || report.lead_id}
+                      </span>
+                      <span className="text-muted-foreground font-mono"> · {report.lead_id}</span>
+                    </span>
+                    <span className={report.status === 'SENT' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>
+                      {report.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              mock 上游已收到 {friendReportsQuery.data?.mock_upstream_reports.length ?? 0} 条好友对账。
+            </p>
+            {(friendReportsQuery.data?.mock_upstream_reports ?? []).length > 0 && (
+              <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+                {(friendReportsQuery.data?.mock_upstream_reports ?? []).slice().reverse().map((report, index) => (
+                  <div
+                    key={`${report.lead_id}-${index}`}
+                    className="border border-border rounded-lg px-2 py-1.5 text-[10px] bg-muted/20"
+                  >
+                    <p className="font-semibold text-foreground truncate">
+                      {report.customer_name || report.account || report.lead_id}
+                    </p>
+                    <p className="font-mono text-muted-foreground truncate">
+                      {report.lead_id} · is_friend={String(report.is_friend)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </Card>
       </div>
       </div>

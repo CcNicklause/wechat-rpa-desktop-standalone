@@ -75,6 +75,10 @@ class LogBroadcaster:
 log_broadcaster = LogBroadcaster()
 
 
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class UpstreamScheduler:
     def __init__(self, settings: Settings, store: SQLiteStore, orchestrator_factory):
         self.settings = settings
@@ -118,7 +122,7 @@ class UpstreamScheduler:
             log=log_broadcaster.log,
         )
 
-        # 2. 启动三个后台守护线程
+        # 2. 启动后台守护线程
         t_heart = threading.Thread(target=self._heartbeat_loop, name="upstream-heartbeat", daemon=True)
         t_fetch = threading.Thread(
             target=self.lead_source.run,
@@ -127,8 +131,13 @@ class UpstreamScheduler:
             daemon=True,
         )
         t_worker = threading.Thread(target=self._worker_loop, name="upstream-worker", daemon=True)
+        t_friend_report = threading.Thread(
+            target=self._friend_check_report_loop,
+            name="upstream-friend-check-report",
+            daemon=True,
+        )
 
-        self._threads = [t_heart, t_fetch, t_worker]
+        self._threads = [t_heart, t_fetch, t_worker, t_friend_report]
         for t in self._threads:
             t.start()
 
@@ -209,6 +218,10 @@ class UpstreamScheduler:
         log_broadcaster.log("收到前端手动命令：强制立刻发送保活心跳")
         self._heartbeat_action()
 
+    def trigger_friend_check_report_now(self) -> dict:
+        log_broadcaster.log("收到前端手动命令：立刻上报好友对账结果")
+        return self._report_friend_checks_once()
+
     def clear_queue(self):
         while not self._task_queue.empty():
             try:
@@ -260,6 +273,41 @@ class UpstreamScheduler:
             except Exception as e:
                 log_broadcaster.log(f"心跳循环异常: {e}")
             self._stop_event.wait(float(self.settings.upstream_heartbeat_interval_seconds))
+
+    def _friend_check_report_loop(self):
+        interval = float(getattr(self.settings, "friend_check_report_interval_seconds", 60))
+        while not self._stop_event.wait(interval):
+            try:
+                self._report_friend_checks_once()
+            except Exception as e:
+                log_broadcaster.log(f"好友对账上报异常: {e}")
+
+    def _report_friend_checks_once(self) -> dict:
+        if not self.client:
+            return {"reported": 0, "failed": 0, "results": []}
+
+        batch_size = int(getattr(self.settings, "friend_check_report_batch_size", 10))
+        reports = self.store.list_pending_friend_check_reports(batch_size)
+        results = []
+        reported = 0
+        failed = 0
+        for report in reports:
+            lead_id = report["lead_id"]
+            is_friend = bool(report["is_friend"])
+            try:
+                ok = self.client.report_friend_check(lead_id, is_friend)
+                if not ok:
+                    raise RuntimeError("upstream rejected friend-check report")
+                updated = self.store.mark_friend_check_report_sent(lead_id, now_iso())
+                reported += 1
+                results.append(updated)
+                log_broadcaster.log(f"✅ 好友对账已上报: {lead_id} -> is_friend={is_friend}")
+            except Exception as exc:
+                failed += 1
+                updated = self.store.mark_friend_check_report_failed(lead_id, str(exc), now_iso())
+                results.append(updated)
+                log_broadcaster.log(f"❌ 好友对账上报失败: {lead_id} -> {exc}")
+        return {"reported": reported, "failed": failed, "results": results}
 
     def _worker_loop(self):
         while not self._stop_event.is_set():

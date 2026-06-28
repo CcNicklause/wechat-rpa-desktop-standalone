@@ -72,12 +72,41 @@ def trigger_heartbeat(scheduler=Depends(get_scheduler)):
     return {"status": "triggered"}
 
 
+@router.post("/dev/trigger-friend-check-report")
+def trigger_friend_check_report(scheduler=Depends(get_scheduler)):
+    if not scheduler:
+        raise HTTPException(status_code=400, detail="Scheduler not ready")
+    return scheduler.trigger_friend_check_report_now()
+
+
 @router.post("/dev/clear-queue")
 def clear_queue(scheduler=Depends(get_scheduler)):
     if not scheduler:
         raise HTTPException(status_code=400, detail="Scheduler not ready")
     scheduler.clear_queue()
     return {"status": "cleared"}
+
+
+@router.get("/dev/friend-check-reports")
+def get_friend_check_reports(
+    limit: int = 100,
+    scheduler=Depends(get_scheduler),
+    store: SQLiteStore = Depends(get_store),
+):
+    upstream_reports = []
+    if scheduler and isinstance(scheduler.client, MockUpstreamClient):
+        for report in scheduler.client.friend_check_reports():
+            enriched = dict(report)
+            lead = store.get_lead(enriched["lead_id"])
+            if lead:
+                enriched["customer_name"] = lead.get("customer_name")
+                enriched["account"] = lead.get("phone")
+                enriched["lead_status"] = lead.get("status")
+            upstream_reports.append(enriched)
+    return {
+        "outbox": store.list_friend_check_reports(limit),
+        "mock_upstream_reports": upstream_reports,
+    }
 
 
 class SeedLead(BaseModel):

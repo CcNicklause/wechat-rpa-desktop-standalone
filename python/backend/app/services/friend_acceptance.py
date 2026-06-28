@@ -167,6 +167,7 @@ class FriendAcceptanceService:
             raise not_found("线索不存在")
 
         if lead["status"] == LeadStatus.WECHAT_ACCEPTED.value:
+            self.store.enqueue_friend_check_report(lead_id, True, now_iso())
             return {
                 "lead_id": lead_id,
                 "phone_masked": mask_phone(lead["phone"]),
@@ -190,11 +191,13 @@ class FriendAcceptanceService:
         result_payload = result.to_dict(lead_id)
 
         if result.accepted:
+            timestamp = now_iso()
             self.store.update_lead(
                 lead_id,
                 status=LeadStatus.WECHAT_ACCEPTED.value,
-                updated_at=now_iso(),
+                updated_at=timestamp,
             )
+            self.store.enqueue_friend_check_report(lead_id, True, timestamp)
             self.audit.record(
                 "wechat.friend.accepted",
                 actor_id=lead["sales_id"],

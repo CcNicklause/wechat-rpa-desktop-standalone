@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     friend_acceptance_recheck_enabled: bool = True
     friend_acceptance_recheck_interval_seconds: int = Field(default=300, ge=30, le=86400)
     friend_acceptance_recheck_batch_size: int = Field(default=3, ge=1, le=10)
+    friend_check_report_interval_seconds: int = Field(default=60, ge=10, le=86400)
+    friend_check_report_batch_size: int = Field(default=10, ge=1, le=50)
     db_path: str = 'backend/data/demo.db'
     audit_log_path: str = 'backend/data/audit.jsonl'
     cors_allow_origins: str = 'http://127.0.0.1:5500,http://localhost:5500,null'

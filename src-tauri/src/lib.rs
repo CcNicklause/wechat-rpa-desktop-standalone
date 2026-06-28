@@ -1,5 +1,5 @@
-use std::sync::Mutex;
 use std::process::{Child, Command};
+use std::sync::Mutex;
 use tauri::State;
 use tauri::Manager;
 
@@ -7,6 +7,41 @@ struct AppState {
     token: String,
     python_process: Mutex<Option<Child>>,
 }
+
+#[cfg(target_os = "windows")]
+fn kill_existing_backend_on_port(port: u16) {
+    let output = Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output();
+    let Ok(output) = output else {
+        return;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut pids = std::collections::HashSet::new();
+    let port_suffix = format!(":{port}");
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let local_addr = parts[1];
+        let state = parts[3];
+        let pid = parts[4];
+        if state == "LISTENING" && local_addr.ends_with(&port_suffix) {
+            pids.insert(pid.to_string());
+        }
+    }
+
+    for pid in pids {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid, "/F"])
+            .output();
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_existing_backend_on_port(_port: u16) {}
 
 #[tauri::command]
 fn get_security_token(state: State<'_, AppState>) -> String {
@@ -54,6 +89,7 @@ pub fn run() {
             println!("[DIAGNOSTIC] final_dir resolved to = {:?}", final_dir);
 
             // Spin up Python development server natively in the background
+            kill_existing_backend_on_port(8000);
             let mut cmd = Command::new("uv");
             cmd.args(&["run", "uvicorn", "backend.app.main:app", "--port", "8000", "--host", "127.0.0.1"]);
             cmd.current_dir(&final_dir);

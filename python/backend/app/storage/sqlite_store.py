@@ -81,6 +81,16 @@ class SQLiteStore:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS friend_check_reports (
+                    lead_id TEXT PRIMARY KEY,
+                    is_friend INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             # 轻量迁移：为已存在的旧库补 outcome_type 列（CREATE TABLE IF NOT
@@ -312,8 +322,129 @@ class SQLiteStore:
             rows = conn.execute("SELECT key, value FROM upstream_config").fetchall()
         return {row["key"]: row["value"] for row in rows}
 
+    def enqueue_friend_check_report(self, lead_id: str, is_friend: bool, timestamp: str) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO friend_check_reports (
+                    lead_id, is_friend, status, attempts, last_error, created_at, updated_at
+                ) VALUES (?, ?, 'PENDING', 0, NULL, ?, ?)
+                ON CONFLICT(lead_id) DO UPDATE SET
+                    is_friend = excluded.is_friend,
+                    status = CASE
+                        WHEN friend_check_reports.status = 'SENT' THEN friend_check_reports.status
+                        ELSE 'PENDING'
+                    END,
+                    last_error = CASE
+                        WHEN friend_check_reports.status = 'SENT' THEN friend_check_reports.last_error
+                        ELSE NULL
+                    END,
+                    updated_at = excluded.updated_at
+                """,
+                (lead_id, int(bool(is_friend)), timestamp, timestamp),
+            )
+            row = conn.execute(
+                "SELECT * FROM friend_check_reports WHERE lead_id = ?",
+                (lead_id,),
+            ).fetchone()
+        return self._decode_friend_check_report(dict(row))
+
+    def list_friend_check_reports(self, limit: int = 100, status: str | None = None) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 500))
+        with self._lock, self._connect() as conn:
+            if status:
+                rows = conn.execute(
+                    """
+                    SELECT r.*, l.customer_name, l.phone AS account, l.status AS lead_status
+                    FROM friend_check_reports r
+                    LEFT JOIN leads l ON l.lead_id = r.lead_id
+                    WHERE r.status = ?
+                    ORDER BY r.updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, safe_limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT r.*, l.customer_name, l.phone AS account, l.status AS lead_status
+                    FROM friend_check_reports r
+                    LEFT JOIN leads l ON l.lead_id = r.lead_id
+                    ORDER BY r.updated_at DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+        return [self._decode_friend_check_report(dict(row)) for row in rows]
+
+    def list_pending_friend_check_reports(self, limit: int = 10) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 50))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM friend_check_reports
+                WHERE status = 'PENDING'
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [self._decode_friend_check_report(dict(row)) for row in rows]
+
+    def mark_friend_check_report_sent(self, lead_id: str, timestamp: str) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE friend_check_reports
+                SET status = 'SENT', last_error = NULL, updated_at = ?
+                WHERE lead_id = ?
+                """,
+                (timestamp, lead_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM friend_check_reports WHERE lead_id = ?",
+                (lead_id,),
+            ).fetchone()
+        if not row:
+            raise KeyError(lead_id)
+        return self._decode_friend_check_report(dict(row))
+
+    def mark_friend_check_report_failed(
+        self,
+        lead_id: str,
+        error: str,
+        timestamp: str,
+        *,
+        max_attempts: int = 5,
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE friend_check_reports
+                SET attempts = attempts + 1,
+                    status = CASE WHEN attempts + 1 >= ? THEN 'FAILED' ELSE 'PENDING' END,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE lead_id = ?
+                """,
+                (max_attempts, error, timestamp, lead_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM friend_check_reports WHERE lead_id = ?",
+                (lead_id,),
+            ).fetchone()
+        if not row:
+            raise KeyError(lead_id)
+        return self._decode_friend_check_report(dict(row))
+
     @staticmethod
     def _nullable_bool(value: Any) -> int | None:
         if value is None:
             return None
         return int(bool(value))
+
+    @staticmethod
+    def _decode_friend_check_report(report: dict[str, Any]) -> dict[str, Any]:
+        report['is_friend'] = bool(report['is_friend'])
+        report['attempts'] = int(report.get('attempts') or 0)
+        return report
