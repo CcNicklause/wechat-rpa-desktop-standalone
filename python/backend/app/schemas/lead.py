@@ -22,6 +22,7 @@ class LeadStatus(StrEnum):
     WECHAT_ALREADY_FRIEND = 'WECHAT_ALREADY_FRIEND'       # 已是好友
     WECHAT_ADD_REJECTED = 'WECHAT_ADD_REJECTED'           # 对方拒绝/限制添加
     WECHAT_RISK_CONTROL = 'WECHAT_RISK_CONTROL'           # 触发风控，已熔断
+    WECHAT_ACCEPTANCE_EXHAUSTED = 'WECHAT_ACCEPTANCE_EXHAUSTED'  # 复查上限达到，停止轮询
 
 
 class LeadCreateRequest(BaseModel):

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -6,10 +6,54 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { FieldError } from '@/components/common/FieldError';
+import { EmptyState } from '@/components/common/EmptyState';
+import { StatusBadge } from '@/components/common/StatusBadge';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { useDevTestStore } from '@/stores/useDevTestStore';
 import { JobProgress } from './JobProgress';
+
+interface BatchLeadRow {
+  lead_id: string;
+  phone: string;
+  customer_name: string;
+  greeting: string;
+}
+
+interface SeedResponse {
+  seeded: number;
+  accepted_by_scheduler: number;
+  scheduler_alive: boolean;
+}
+
+const DEFAULT_GREETING = '您好，我是销售顾问，收到了您的微信申请。';
+
+function makeDefaultRow(index: number): BatchLeadRow {
+  return {
+    lead_id: `dev_mock_${Date.now()}_${index}`,
+    phone: '',
+    customer_name: '',
+    greeting: DEFAULT_GREETING,
+  };
+}
+
+function buildQuickFillRows(count: number): BatchLeadRow[] {
+  return Array.from({ length: count }, (_, i) => {
+    const ordinal = i + 1;
+    return {
+      lead_id: `dev_mock_lead_${ordinal}`,
+      phone: `1380000000${ordinal}`,
+      customer_name: `Mock 测试 ${ordinal}`,
+      greeting: DEFAULT_GREETING,
+    };
+  });
+}
 
 const testSchema = z.object({
   phone: z.string().min(5, '手机号或微信号格式不符合验证规则'),
@@ -29,6 +73,36 @@ interface AuditEvent {
   message?: string | null;
 }
 
+interface LeadSummary {
+  lead_id: string;
+  customer_name: string;
+  phone_masked: string;
+  status: string;
+}
+
+interface FriendCheckReport {
+  lead_id: string;
+  is_friend: boolean;
+  status: string;
+  attempts: number;
+  last_error?: string | null;
+  updated_at: string;
+  customer_name?: string | null;
+  account?: string | null;
+  lead_status?: string | null;
+}
+
+interface FriendCheckReportsResponse {
+  outbox: FriendCheckReport[];
+  mock_upstream_reports: Array<{
+    lead_id: string;
+    is_friend: boolean;
+    customer_name?: string | null;
+    account?: string | null;
+    lead_status?: string | null;
+  }>;
+}
+
 const TEMPLATES = [
   { title: '模板 1：默认销售加微', text: '您好，我是销售顾问，收到了您的微信申请。' },
   { title: '模板 2：商务合作对接', text: '您好，我是 WeChat RPA 的对接人，想跟您进行商务合作。' },
@@ -38,6 +112,88 @@ const TEMPLATES = [
 export function DevTesting() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const [batchRows, setBatchRows] = useState<BatchLeadRow[]>([makeDefaultRow(0)]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [simulatingLeadId, setSimulatingLeadId] = useState<string | null>(null);
+  const [flushingReports, setFlushingReports] = useState(false);
+  const [clearingPendingFriendLeads, setClearingPendingFriendLeads] = useState(false);
+  const [manualFriendAccount, setManualFriendAccount] = useState('');
+  const [manualFriendName, setManualFriendName] = useState('');
+  const [manualSimulating, setManualSimulating] = useState(false);
+
+  const updateBatchRow = (index: number, patch: Partial<BatchLeadRow>) => {
+    setBatchRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const addBatchRow = () => {
+    setBatchRows((rows) => [...rows, makeDefaultRow(rows.length)]);
+  };
+
+  const removeBatchRow = (index: number) => {
+    setBatchRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)));
+  };
+
+  const fillFiveMockRows = () => {
+    setBatchRows(buildQuickFillRows(5));
+  };
+
+  const submitBatch = async () => {
+    const invalid = batchRows.some(
+      (row) =>
+        !row.lead_id.trim() ||
+        row.phone.trim().length < 5 ||
+        !row.customer_name.trim() ||
+        !row.greeting.trim(),
+    );
+    if (invalid) {
+      toast({
+        title: '存在不合规的行',
+        description: '请确保每一行 lead_id / phone / customer_name / greeting 都已填写，phone 至少 5 个字符。',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `⚠️ 即将下发 ${batchRows.length} 条线索到 mock 上游待发池，` +
+        `并立即触发本地拉取与 RPA 队列执行。\n\n` +
+        `本地 rpa_mode 决定后续是模拟还是真实加微（默认 real）。是否确认？`,
+    );
+    if (!confirmed) {
+      toast({ title: '已取消', description: '未提交批量模拟线索', variant: 'default' });
+      return;
+    }
+
+    setBatchSubmitting(true);
+    try {
+      const response = await requestLocalApi<SeedResponse>(
+        '/api/v1/upstream/dev/seed-mock-leads',
+        {
+          method: 'POST',
+          body: JSON.stringify({ leads: batchRows }),
+        },
+      );
+      const skipped = response.seeded - response.accepted_by_scheduler;
+      toast({
+        title: `已下发 ${response.seeded} 条到 mock 上游`,
+        description: `调度器接受 ${response.accepted_by_scheduler} 条，${skipped} 条被去重或终态跳过。请到「上游对接」页查看实时日志。`,
+        variant: 'success',
+      });
+    } catch (err: any) {
+      const message = err?.message || '';
+      const isNetworkDown =
+        err instanceof TypeError ||
+        /Failed to fetch|NetworkError|ECONNREFUSED|Connection refused/i.test(message);
+      toast({
+        title: isNetworkDown ? '无法连接本地后端' : '批量下发失败',
+        description: message || '请检查后端状态或上游模式（mock 才允许种子下发）',
+        variant: 'destructive',
+      });
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
 
   // 所有跨刷新需要保留的状态都进了 zustand store + persist；本组件只读不存 useState，
   // 这样即便表单意外触发原生提交导致整树重挂载，重新挂载后能立刻看到上次的 job/审计/表单值。
@@ -88,13 +244,167 @@ export function DevTesting() {
       ),
   });
 
+  const leadsQuery = useQuery<LeadSummary[]>({
+    queryKey: ['dev-test-leads'],
+    refetchInterval: 8000,
+    queryFn: () => requestLocalApi<LeadSummary[]>('/api/v1/leads?limit=200'),
+  });
+
+  const friendReportsQuery = useQuery<FriendCheckReportsResponse>({
+    queryKey: ['dev-test-friend-check-reports'],
+    refetchInterval: 8000,
+    queryFn: () =>
+      requestLocalApi<FriendCheckReportsResponse>('/api/v1/upstream/dev/friend-check-reports?limit=100'),
+  });
+
+  const pendingFriendLeads = (leadsQuery.data ?? []).filter(
+    (lead) => lead.status === 'WECHAT_ADD_REQUESTED',
+  );
+
+  const simulateFriendAccepted = async (leadId: string) => {
+    setSimulatingLeadId(leadId);
+    try {
+      await requestLocalApi('/api/v1/friend-acceptance/dev/simulate-accepted', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+      toast({
+        title: '已模拟好友通过',
+        description: `${leadId} 已写入本地好友确认与待上报队列`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-audit', leadId] });
+    } catch (err: any) {
+      toast({
+        title: '模拟好友通过失败',
+        description: err?.message || '请确认线索状态为 WECHAT_ADD_REQUESTED',
+        variant: 'destructive',
+      });
+    } finally {
+      setSimulatingLeadId(null);
+    }
+  };
+
+  const flushFriendReports = async () => {
+    setFlushingReports(true);
+    try {
+      const res = await requestLocalApi<any>('/api/v1/upstream/dev/trigger-friend-check-report', {
+        method: 'POST',
+      });
+      toast({
+        title: '好友对账上报已触发',
+        description: `成功 ${res.reported ?? 0} 条，失败 ${res.failed ?? 0} 条`,
+        variant: (res.failed ?? 0) > 0 ? 'destructive' : 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      toast({
+        title: '触发好友对账上报失败',
+        description: err?.message || '请确认上游调度器已启动',
+        variant: 'destructive',
+      });
+    } finally {
+      setFlushingReports(false);
+    }
+  };
+
+  const clearPendingFriendLeads = async () => {
+    if (pendingFriendLeads.length === 0) {
+      toast({
+        title: '暂无待清理线索',
+        description: '当前没有 WECHAT_ADD_REQUESTED 状态的线索',
+        variant: 'default',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `即将把 ${pendingFriendLeads.length} 条 WECHAT_ADD_REQUESTED 线索标记为 RPA_BLOCKED，空闲对账将不再扫描它们。是否继续？`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setClearingPendingFriendLeads(true);
+    try {
+      const res = await requestLocalApi<{ cleared: number; to_status: string }>(
+        '/api/v1/friend-acceptance/dev/clear-pending',
+        { method: 'POST' },
+      );
+      toast({
+        title: '已清理待对账线索',
+        description: `共清理 ${res.cleared ?? 0} 条，状态已置为 ${res.to_status ?? 'RPA_BLOCKED'}`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      toast({
+        title: '清理待对账线索失败',
+        description: err?.message || '请确认后端已加载新的开发测试接口',
+        variant: 'destructive',
+      });
+    } finally {
+      setClearingPendingFriendLeads(false);
+    }
+  };
+
+  const simulateManualFriendAccepted = async (flushAfter: boolean) => {
+    const account = manualFriendAccount.trim();
+    if (account.length < 5) {
+      toast({
+        title: '请输入账号',
+        description: '账号至少 5 个字符，用于创建开发测试好友对账线索',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setManualSimulating(true);
+    try {
+      const res = await requestLocalApi<any>('/api/v1/friend-acceptance/dev/simulate-accepted', {
+        method: 'POST',
+        body: JSON.stringify({
+          account,
+          customer_name: manualFriendName.trim() || account,
+        }),
+      });
+      if (flushAfter) {
+        await requestLocalApi('/api/v1/upstream/dev/trigger-friend-check-report', {
+          method: 'POST',
+        });
+      }
+      toast({
+        title: flushAfter ? '已模拟并立即上报' : '已模拟已是好友账号',
+        description: `${res.lead_id || account} 已进入好友对账链路`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      const message = err?.message || '';
+      const endpointMissing = /API Error 404|Not Found/i.test(message);
+      toast({
+        title: '手动账号模拟失败',
+        description: endpointMissing
+          ? '后端还没加载新的模拟接口，请重启 Python 后端或重新运行 pnpm tauri dev'
+          : message || '请确认后端和上游调度器已启动',
+        variant: 'destructive',
+      });
+    } finally {
+      setManualSimulating(false);
+    }
+  };
+
   const handleSelectTemplate = (val: string) => {
     setValue('greeting', val, { shouldDirty: true });
     setFormDraft({ greeting: val });
   };
 
   const onSubmit = async (data: TestFormValues) => {
-    // 真实加微需要前端二次人工确认，再把 human_approval 透传给后端
+    // 开发测试页保留前端确认，避免误触真实微信自动化；真实上游队列不需要人工确认。
     if (!data.dryRun) {
       const confirmed = window.confirm(
         `⚠️ 即将执行【真实加微】操作\n\n目标：${data.phone}\n验证语：${data.greeting}\n\n后端会接管 Windows 引擎对微信客户端发送真实指令，是否确认继续？`,
@@ -135,8 +445,7 @@ export function DevTesting() {
       });
 
       // 3. Trigger RPA task
-      // dry_run=false 必须同步把 human_approval 置 true，否则后端会以
-      // HUMAN_APPROVAL_REQUIRED 拒绝（rpa_orchestrator._validate_add_request）。
+      // human_approval 仅作为审计字段保留；后端真实队列不再要求人工二次确认。
       const response = await requestLocalApi<any>('/api/v1/rpa/add-wechat', {
         method: 'POST',
         body: JSON.stringify({
@@ -188,12 +497,99 @@ export function DevTesting() {
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden p-6 gap-6">
-      <Card className="flex-[3] min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
+    <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
+      <Card className="p-6 shadow-sm border border-border bg-card">
+        <CardHeader className="p-0 pb-4 border-b border-border mb-4">
+          <CardTitle>批量线索模拟（走真实上游链路）</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 space-y-3 text-xs">
+          <p className="text-[11px] text-muted-foreground">
+            每一行代表一条上游下发的线索。提交后会进入 mock 上游待发池并立即触发一次拉取，
+            后续可在「上游对接」页观察日志、状态和队列。当前 rpa_mode 由后端 .env 决定（默认 real）。
+          </p>
+
+          <div className="space-y-2">
+            <div className="grid grid-cols-[1.2fr_1fr_1fr_1.5fr_auto] gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
+              <span>lead_id</span>
+              <span>phone</span>
+              <span>customer_name</span>
+              <span>greeting</span>
+              <span></span>
+            </div>
+            {batchRows.map((row, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-[1.2fr_1fr_1fr_1.5fr_auto] gap-2 items-start"
+              >
+                <Input
+                  type="text"
+                  value={row.lead_id}
+                  onChange={(e) => updateBatchRow(index, { lead_id: e.target.value })}
+                  placeholder="dev_mock_..."
+                  className="h-7 px-2 py-1"
+                />
+                <Input
+                  type="text"
+                  value={row.phone}
+                  onChange={(e) => updateBatchRow(index, { phone: e.target.value })}
+                  placeholder="138..."
+                  className="h-7 px-2 py-1"
+                />
+                <Input
+                  type="text"
+                  value={row.customer_name}
+                  onChange={(e) => updateBatchRow(index, { customer_name: e.target.value })}
+                  placeholder="测试用户"
+                  className="h-7 px-2 py-1"
+                />
+                <Input
+                  type="text"
+                  value={row.greeting}
+                  onChange={(e) => updateBatchRow(index, { greeting: e.target.value })}
+                  placeholder="验证语"
+                  className="h-7 px-2 py-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => removeBatchRow(index)}
+                  disabled={batchRows.length <= 1}
+                  className="h-7 px-2 text-[10px]"
+                >
+                  删除
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button type="button" size="sm" variant="outline" onClick={addBatchRow}>
+              + 新增一行
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={fillFiveMockRows}>
+              快速填 5 条 mock
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={submitBatch}
+              disabled={batchSubmitting}
+              className="ml-auto"
+            >
+              {batchSubmitting ? '正在下发…' : '⚠️ 一键模拟下发'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)] gap-6 items-start pb-6">
+      <Card className="min-w-0 flex flex-col p-6 shadow-sm border border-border bg-card">
         <CardHeader className="p-0 pb-4 border-b border-border mb-4">
           <CardTitle>手动加友功能测试面板</CardTitle>
         </CardHeader>
-        <CardContent className="p-0 flex-1 flex flex-col justify-between">
+        <CardContent className="p-0">
           <form
             // 显式拦截原生提交，防止 Tauri webview 把表单 action="" 当作页面 reload，
             // 导致 AppShell 整树重挂载、hash 路由被默认值覆盖到 #/dashboard。
@@ -210,36 +606,33 @@ export function DevTesting() {
             className="space-y-4 text-xs"
           >
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">测试手机号 / 微信号</label>
-              <input
+              <Label>测试手机号 / 微信号</Label>
+              <Input
                 type="text"
                 {...register('phone')}
                 placeholder="请输入手机号或者微信号"
-                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               />
-              {errors.phone && <p className="text-[10px] text-rose-500 font-semibold">{errors.phone.message}</p>}
+              {errors.phone && <FieldError>{errors.phone.message}</FieldError>}
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">常用验证模板预设</label>
-              <select
+              <Label>常用验证模板预设</Label>
+              <Select
                 onChange={(e) => handleSelectTemplate(e.target.value)}
-                className="w-full px-3 py-1.5 bg-background border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               >
                 {TEMPLATES.map((t, idx) => (
                   <option key={idx} value={t.text}>{t.title}</option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
-              <label className="font-semibold text-muted-foreground">验证语设置</label>
-              <textarea
+              <Label>验证语设置</Label>
+              <Textarea
                 {...register('greeting')}
                 rows={3}
-                className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
               />
-              {errors.greeting && <p className="text-[10px] text-rose-500 font-semibold">{errors.greeting.message}</p>}
+              {errors.greeting && <FieldError>{errors.greeting.message}</FieldError>}
             </div>
 
             <div className="flex justify-between items-center border border-border p-3 bg-muted/20 rounded-xl">
@@ -265,8 +658,8 @@ export function DevTesting() {
         </CardContent>
       </Card>
 
-      <div className="flex-[2] min-w-0 flex flex-col gap-6 overflow-hidden">
-        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-4">
+      <div className="min-w-0 flex flex-col gap-6">
+        <Card className="min-h-[236px] p-6 border border-border bg-card flex flex-col gap-4">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">🧪 运行测试反馈控制台</h3>
             {testJobId && jobFinished && (
@@ -289,15 +682,16 @@ export function DevTesting() {
               onComplete={markFinished}
             />
           ) : (
-            <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
-              <span className="text-3xl block">🔬</span>
-              <p className="text-xs">暂无测试进程运行</p>
-              <p className="text-[10px]">配置左侧参数后点击"立即执行加友测试"即可捕获并监听本地指令</p>
-            </div>
+            <EmptyState
+              variant="fill"
+              icon="🔬"
+              title="暂无测试进程运行"
+              description={'配置左侧参数后点击"立即执行加友测试"即可捕获并监听本地指令'}
+            />
           )}
         </Card>
 
-        <Card className="flex-1 min-h-0 p-6 border border-border bg-card flex flex-col gap-3 overflow-hidden">
+        <Card className="min-h-[236px] max-h-[420px] p-6 border border-border bg-card flex flex-col gap-3 overflow-hidden">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">📒 审计事件</h3>
             <Button
@@ -319,6 +713,155 @@ export function DevTesting() {
             error={auditQuery.error as Error | null}
           />
         </Card>
+
+        <Card className="p-6 border border-border bg-card flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-border">
+            <h3 className="font-semibold text-xs text-foreground tracking-wider">🤝 好友通过模拟 / 对账</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              className="h-6 px-2 text-[10px] ml-auto"
+              disabled={clearingPendingFriendLeads || pendingFriendLeads.length === 0}
+              onClick={clearPendingFriendLeads}
+            >
+              {clearingPendingFriendLeads ? '清理中...' : '清理待对账'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              className="h-6 px-2 text-[10px]"
+              disabled={flushingReports}
+              onClick={flushFriendReports}
+            >
+              {flushingReports ? '上报中...' : '立即上报'}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px]">已是好友账号</Label>
+              <Input
+                type="text"
+                value={manualFriendAccount}
+                onChange={(e) => setManualFriendAccount(e.target.value)}
+                placeholder="输入微信号/手机号"
+                className="h-7 px-2 py-1.5 text-[11px]"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px]">账号昵称</Label>
+              <Input
+                type="text"
+                value={manualFriendName}
+                onChange={(e) => setManualFriendName(e.target.value)}
+                placeholder="例如：张三"
+                className="h-7 px-2 py-1.5 text-[11px]"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              disabled={manualSimulating}
+              onClick={() => simulateManualFriendAccepted(false)}
+            >
+              {manualSimulating ? '处理中...' : '模拟已是好友'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="default"
+              className="h-7 text-[10px]"
+              disabled={manualSimulating}
+              onClick={() => simulateManualFriendAccepted(true)}
+            >
+              模拟并立即上报测试
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-muted-foreground">待通过线索</p>
+            {pendingFriendLeads.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">暂无 WECHAT_ADD_REQUESTED 线索</p>
+            ) : (
+              pendingFriendLeads.slice(0, 5).map((lead) => (
+                <div
+                  key={lead.lead_id}
+                  className="flex items-center justify-between gap-2 border border-border rounded-lg bg-muted/20 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-foreground truncate">{lead.customer_name}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono truncate">
+                      {lead.lead_id} · {lead.phone_masked}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 text-[10px] shrink-0"
+                    disabled={simulatingLeadId === lead.lead_id}
+                    onClick={() => simulateFriendAccepted(lead.lead_id)}
+                  >
+                    {simulatingLeadId === lead.lead_id ? '模拟中' : '模拟已通过'}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-muted-foreground">本地待上报 / 上报结果</p>
+            {(friendReportsQuery.data?.outbox ?? []).length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">暂无好友对账记录</p>
+            ) : (
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                {(friendReportsQuery.data?.outbox ?? []).map((report) => (
+                  <div
+                    key={report.lead_id}
+                    className="flex items-center justify-between gap-2 border border-border rounded-lg px-2 py-1.5 text-[10px]"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="font-semibold text-foreground">
+                        {report.customer_name || report.account || report.lead_id}
+                      </span>
+                      <span className="text-muted-foreground font-mono"> · {report.lead_id}</span>
+                    </span>
+                    <StatusBadge
+                      status={report.status}
+                      showDot
+                      className="shrink-0 text-[10px]"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              mock 上游已收到 {friendReportsQuery.data?.mock_upstream_reports.length ?? 0} 条好友对账。
+            </p>
+            {(friendReportsQuery.data?.mock_upstream_reports ?? []).length > 0 && (
+              <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+                {(friendReportsQuery.data?.mock_upstream_reports ?? []).slice().reverse().map((report, index) => (
+                  <div
+                    key={`${report.lead_id}-${index}`}
+                    className="border border-border rounded-lg px-2 py-1.5 text-[10px] bg-muted/20"
+                  >
+                    <p className="font-semibold text-foreground truncate">
+                      {report.customer_name || report.account || report.lead_id}
+                    </p>
+                    <p className="font-mono text-muted-foreground truncate">
+                      {report.lead_id} · is_friend={String(report.is_friend)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
       </div>
     </div>
   );
@@ -341,18 +884,17 @@ function AuditEventList({
 }) {
   if (!leadId) {
     return (
-      <div className="flex-1 flex flex-col justify-center items-center text-center text-muted-foreground py-10 space-y-2">
-        <span className="text-3xl block">🗂️</span>
-        <p className="text-xs">暂无审计事件</p>
-        <p className="text-[10px]">执行测试后会按 lead_id 拉取本次测试相关的审计流</p>
-      </div>
+      <EmptyState
+        variant="fill"
+        icon="🗂️"
+        title="暂无审计事件"
+        description="执行测试后会按 lead_id 拉取本次测试相关的审计流"
+      />
     );
   }
 
   if (error) {
-    return (
-      <p className="text-[11px] text-rose-500 font-semibold">❌ {error.message}</p>
-    );
+    return <FieldError className="text-[11px]">❌ {error.message}</FieldError>;
   }
 
   if (isLoading && events.length === 0) {
@@ -393,19 +935,18 @@ function AuditEventList({
   );
 }
 
+const META_TONE_VARIANT: Record<'default' | 'success' | 'warn' | 'fail', 'secondary' | 'success' | 'pending' | 'failed'> = {
+  default: 'secondary',
+  success: 'success',
+  warn: 'pending',
+  fail: 'failed',
+};
+
 function MetaPill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'fail' }) {
-  const toneClass =
-    tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-600'
-      : tone === 'warn'
-        ? 'bg-amber-500/15 text-amber-600'
-        : tone === 'fail'
-          ? 'bg-rose-500/15 text-rose-600'
-          : 'bg-muted text-muted-foreground';
   return (
-    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${toneClass}`}>
+    <Badge variant={META_TONE_VARIANT[tone]} className="px-1.5 py-0.5 text-[10px]">
       {children}
-    </span>
+    </Badge>
   );
 }
 

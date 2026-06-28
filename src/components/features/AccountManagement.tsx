@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { invoke } from '@tauri-apps/api/core';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { FieldError } from '@/components/common/FieldError';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToast } from '@/hooks/useToast';
 
@@ -47,13 +50,11 @@ export function AccountManagement() {
     defaultValues: { oldPassword: '', newPassword: '', confirmPassword: '' },
   });
 
-  const onSubmit = async (data: PasswordFormValues) => {
-    // Simulate API change password
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  const onSubmit = async (_data: PasswordFormValues) => {
     toast({
-      title: '修改密码成功',
-      description: '登录席位密码已安全修改',
-      variant: 'success',
+      title: '请前往 Web Portal',
+      description: '桌面端当前只负责登录，不直接修改 Portal 账号密码',
+      variant: 'default',
     });
     reset();
   };
@@ -73,7 +74,15 @@ export function AccountManagement() {
           <CardContent className="p-0 pt-4 space-y-4 text-xs">
             <div className="flex justify-between border-b pb-2">
               <span className="text-muted-foreground">当前席位名称</span>
-              <span className="font-semibold">{user?.username || 'Guest'}</span>
+              <span className="font-semibold">{user?.name || user?.phone || 'Guest'}</span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-muted-foreground">Portal 手机号</span>
+              <span className="font-semibold">{user?.phone || '-'}</span>
+            </div>
+            <div className="flex justify-between border-b pb-2">
+              <span className="text-muted-foreground">租户 ID</span>
+              <span className="font-semibold">{user?.tenant_id ?? '-'}</span>
             </div>
             <div className="flex justify-between border-b pb-2">
               <span className="text-muted-foreground">权限级别</span>
@@ -103,31 +112,28 @@ export function AccountManagement() {
           <CardContent className="p-0 pt-4">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-xs">
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">旧密码</label>
-                <input
+                <Label>旧密码</Label>
+                <Input
                   type="password"
                   {...register('oldPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.oldPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.oldPassword.message}</p>}
+                <FieldError>{errors.oldPassword?.message}</FieldError>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">新密码</label>
-                <input
+                <Label>新密码</Label>
+                <Input
                   type="password"
                   {...register('newPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.newPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.newPassword.message}</p>}
+                <FieldError>{errors.newPassword?.message}</FieldError>
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">确认新密码</label>
-                <input
+                <Label>确认新密码</Label>
+                <Input
                   type="password"
                   {...register('confirmPassword')}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
                 />
-                {errors.confirmPassword && <p className="text-[10px] text-rose-500 font-semibold">{errors.confirmPassword.message}</p>}
+                <FieldError>{errors.confirmPassword?.message}</FieldError>
               </div>
               <Button type="submit" className="w-full h-8" disabled={isSubmitting}>
                 保存修改

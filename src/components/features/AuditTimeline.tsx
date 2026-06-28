@@ -1,5 +1,6 @@
 import { Card, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { EmptyState } from '@/components/common/EmptyState';
 import { AuditLog } from '@/hooks/useAudits';
 
 interface AuditTimelineProps {
@@ -106,22 +107,14 @@ export function AuditTimeline({ audits }: AuditTimelineProps) {
           return (
             <div key={audit.id} className="relative pl-6 pb-2 border-l border-border last:border-l-0">
               {/* Flat Slate point */}
-              <div className="absolute -left-[6px] top-0.5 w-3 h-3 rounded-full bg-background border-2 border-primary flex items-center justify-center" />
+              <div className="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full bg-background border-2 border-primary flex items-center justify-center" />
               
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <span className="font-mono text-primary">
                     {audit.timestamp ? audit.timestamp.slice(11, 19) : '00:00:00'}
                   </span>
-                  <Badge
-                    variant={
-                      audit.result === 'success' || audit.result === 'started' || audit.result === 'approved'
-                        ? 'success'
-                        : 'failed'
-                    }
-                  >
-                    {displayResult}
-                  </Badge>
+                  <StatusBadge status={audit.result} label={displayResult} />
                 </div>
                 <p className="text-[11px] font-semibold text-foreground">{displayTitle}</p>
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
@@ -131,11 +124,7 @@ export function AuditTimeline({ audits }: AuditTimelineProps) {
             </div>
           );
         })}
-        {audits.length === 0 && (
-          <div className="text-center py-16 text-muted-foreground">
-            <p className="text-xs">暂无审计事件</p>
-          </div>
-        )}
+        {audits.length === 0 && <EmptyState title="暂无审计事件" />}
       </div>
     </Card>
   );

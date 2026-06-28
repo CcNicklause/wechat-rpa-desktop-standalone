@@ -2,6 +2,7 @@ import random
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Callable
 
 from backend.app.core.audit import AuditLogger
 from backend.app.core.config import Settings
@@ -13,8 +14,17 @@ from backend.app.schemas.rpa import CheckItem
 from backend.app.services.consent_service import assert_lead_has_consent
 from backend.app.services.simulation_rpa import execute_simulation
 from backend.app.services.wechat_rpa import RpaBusinessOutcome, execute_single_add_request
-from backend.app.storage.sqlite_store import SQLiteStore
+from backend.app.storage.sqlite_store import LeadBusyError, SQLiteStore
 from backend.app.workers.local_queue import run_background
+
+
+# 与 _worker_loop 中的 running_states 保持一致，意为"该 lead 已有进行中的 RPA job"。
+_BUSY_JOB_STATUSES = (
+    'REAL_QUEUED',
+    'REAL_RUNNING',
+    'SIMULATION_QUEUED',
+    'SIMULATION_RUNNING',
+)
 
 
 def now_iso() -> str:
@@ -22,10 +32,25 @@ def now_iso() -> str:
 
 
 class RpaOrchestrator:
-    def __init__(self, store: SQLiteStore, audit: AuditLogger, settings: Settings):
+    def __init__(
+        self,
+        store: SQLiteStore,
+        audit: AuditLogger,
+        settings: Settings,
+        *,
+        risk_event_handler: Callable[[str], None] | None = None,
+        retry_precheck: Callable[[dict, str, Callable[[str], None]], None] | None = None,
+    ):
         self.store = store
         self.audit = audit
         self.settings = settings
+        # 风控终态时由调度器侧（UpstreamScheduler.notify_risk_event）处理；
+        # 没有调度器（HTTP 直接调用 / 测试）时为 None，仅 daily_counters 兜底。
+        self.risk_event_handler = risk_event_handler
+        # 重试前轻量核验：传入 (lead, phone, update_step)，可能抛 RpaBusinessOutcome
+        # 命中 ALREADY_FRIEND / SEND_SUCCESS / RISK_CONTROL；自身系统错误不重抛，仅 update_step。
+        # 默认 None 即未启用（保留向下兼容 / 测试简化）。生产由 main.py 注入。
+        self.retry_precheck = retry_precheck
 
     def precheck(self, lead_id: str) -> dict:
         lead = self._require_lead(lead_id)
@@ -106,7 +131,29 @@ class RpaOrchestrator:
             'created_at': timestamp,
             'updated_at': timestamp,
         }
-        self.store.create_job(job)
+        try:
+            self.store.create_job_if_lead_idle(job, _BUSY_JOB_STATUSES)
+        except LeadBusyError as busy:
+            # 同一 lead 已有进行中的 RPA job：拒绝创建第二个，避免重复加微 / OCR 串话。
+            self.audit.record(
+                'rpa.blocked.lead_busy',
+                actor_id=lead['sales_id'],
+                lead_id=lead_id,
+                phone_masked=mask_phone(lead['phone']),
+                rpa_mode=effective_mode,
+                dry_run=job['dry_run'],
+                customer_consent=bool(lead.get('customer_consent')),
+                human_approval=human_approval,
+                result='blocked',
+                reason_code='RPA_LEAD_BUSY',
+                message=f"已有进行中的 job {busy.existing_job_id} (status={busy.existing_status})",
+            )
+            from fastapi import status as http_status
+            raise AppError(
+                'RPA_LEAD_BUSY',
+                '该线索已有进行中的 RPA 任务，请勿重复触发',
+                http_status.HTTP_409_CONFLICT,
+            )
         self.audit.record(
             'rpa.simulation.started' if effective_mode == 'simulation' else 'rpa.real.requested',
             actor_id=lead['sales_id'],
@@ -145,6 +192,30 @@ class RpaOrchestrator:
         max_retries = 1
         for attempt in range(max_retries + 1):
             try:
+                # 重试前核验：attempt==0 跳过；attempt>0 时若启用且注入了 retry_precheck，
+                # 先"只看不点"读屏：命中 ALREADY_FRIEND / SEND_SUCCESS / RISK_CONTROL → 抛
+                # RpaBusinessOutcome 由本 try 的 except 链路收尾；自身系统错误仅 update_step。
+                if attempt > 0 and self.retry_precheck is not None and getattr(self.settings, 'rpa_retry_precheck_enabled', True):
+                    try:
+                        self.retry_precheck(lead, job.get('greeting', ''), update_step)
+                    except RpaBusinessOutcome:
+                        # 让外层 except RpaBusinessOutcome 接管，走业务终态收尾
+                        raise
+                    except Exception as precheck_exc:
+                        pc_code = (
+                            precheck_exc.detail['code']
+                            if isinstance(precheck_exc, AppError) and isinstance(precheck_exc.detail, dict)
+                            else 'SYS_RETRY_PRECHECK_FAILED'
+                        )
+                        pc_msg = (
+                            precheck_exc.detail['message']
+                            if isinstance(precheck_exc, AppError) and isinstance(precheck_exc.detail, dict)
+                            else str(precheck_exc)
+                        )
+                        update_step(
+                            f"SYS_RETRY_PRECHECK_FAILED: 重试前核验失败 [{pc_code}] {pc_msg}，仍继续重试"
+                        )
+
                 with runtime_guard.single_task():
                     if job['rpa_mode'] == 'simulation':
                         self.store.update_job(job_id, status='SIMULATION_RUNNING', updated_at=now_iso())
@@ -195,11 +266,7 @@ class RpaOrchestrator:
                         )
                     self._run_add_request_with_timeout(lead['phone'], job['greeting'], update_step, job_id)
                     increment_daily_count(self.store, lead['sales_id'])
-                    lead_status = (
-                        LeadStatus.WECHAT_ACCEPTED
-                        if self._steps_indicate_direct_acceptance(steps)
-                        else LeadStatus.WECHAT_ADD_REQUESTED
-                    )
+                    lead_status = LeadStatus.WECHAT_ADD_REQUESTED
                     self.store.update_job(
                         job_id,
                         status='REAL_COMPLETED',
@@ -291,10 +358,6 @@ class RpaOrchestrator:
         if result['exc'] is not None:
             raise result['exc']
 
-    @staticmethod
-    def _steps_indicate_direct_acceptance(steps: list[str]) -> bool:
-        return any(step.startswith('ADD_DIRECTLY_CONFIRMED') for step in steps)
-
     def _record_wechat_success_outcome(self, lead: dict, lead_status: LeadStatus) -> None:
         if lead_status == LeadStatus.WECHAT_ACCEPTED:
             self.audit.record(
@@ -326,6 +389,8 @@ class RpaOrchestrator:
         'BIZ_ALREADY_FRIEND': LeadStatus.WECHAT_ALREADY_FRIEND,
         'BIZ_ADD_REJECTED': LeadStatus.WECHAT_ADD_REJECTED,
         'BIZ_RISK_CONTROL': LeadStatus.WECHAT_RISK_CONTROL,
+        # 重试前核验若读到"申请已发送"，等价于一次正常发送成功。
+        'BIZ_ALREADY_REQUESTED': LeadStatus.WECHAT_ADD_REQUESTED,
     }
 
     def _finalize_business_outcome(
@@ -344,6 +409,9 @@ class RpaOrchestrator:
         )
         self.store.update_lead(lead['lead_id'], status=lead_status.value, updated_at=now_iso())
 
+        if lead_status == LeadStatus.WECHAT_ALREADY_FRIEND:
+            self.store.enqueue_friend_check_report(lead['lead_id'], True, now_iso())
+
         # 风控终态触发当天熔断：把今日计数顶到上限，阻止后续任务
         if outcome.circuit_break:
             try:
@@ -351,6 +419,14 @@ class RpaOrchestrator:
                     increment_daily_count(self.store, lead['sales_id'])
             except Exception:
                 pass
+            # 同时通知调度器进入 RISK_FROZEN（如果有注入 handler 的话）。
+            # daily_counters 是当日兜底，notify_risk_event 是显式冻结期，二者叠加。
+            if self.risk_event_handler is not None:
+                try:
+                    self.risk_event_handler(outcome.code)
+                except Exception:
+                    # 风控回调失败不应阻塞业务终态收尾；记录到 audit 用 reason_code 标识。
+                    pass
 
         self.audit.record(
             'rpa.real.business_outcome',
@@ -423,8 +499,6 @@ class RpaOrchestrator:
             raise AppError('REAL_RPA_DISABLED', '当前为模拟模式，未触发真实微信操作')
 
         if self.settings.rpa_mode == 'real' and not dry_run:
-            if self.settings.rpa_require_human_approval and not human_approval:
-                raise AppError('HUMAN_APPROVAL_REQUIRED', '真实 RPA 需要人工二次确认')
             try:
                 enforce_daily_limit(self.store, self.settings, lead['sales_id'])
             except AppError:

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { EmptyState } from '@/components/common/EmptyState';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { AuditLog } from '@/hooks/useAudits';
@@ -16,7 +18,6 @@ export function RiskControl({ audits }: RiskControlProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dailyLimit, setDailyLimit] = useState(3);
-  const [requireApproval, setRequireApproval] = useState(true);
   const [minInterval, setMinInterval] = useState(3);
   const [maxInterval, setMaxInterval] = useState(9);
 
@@ -25,7 +26,6 @@ export function RiskControl({ audits }: RiskControlProps) {
       try {
         const res = await requestLocalApi<any>('/api/v1/health');
         setDailyLimit(res.daily_limit || 3);
-        setRequireApproval(res.real_rpa_requires_human_approval ?? true);
         setMinInterval(res.min_interval ?? 3);
         setMaxInterval(res.max_interval ?? 9);
         setLoading(false);
@@ -43,7 +43,6 @@ export function RiskControl({ audits }: RiskControlProps) {
         method: 'POST',
         body: JSON.stringify({
           daily_limit: dailyLimit,
-          require_human_approval: requireApproval,
           min_interval: minInterval,
           max_interval: maxInterval,
         }),
@@ -88,35 +87,25 @@ export function RiskControl({ audits }: RiskControlProps) {
               />
             </div>
 
-            <div className="flex justify-between items-center border border-border p-3.5 bg-muted/20 rounded-xl">
-              <div className="space-y-0.5">
-                <span className="font-semibold text-xs">启动人工确认审批机制</span>
-                <p className="text-[10px] text-muted-foreground">如果关闭，线索进入后将由后台静默脚本发起微信自动化加友</p>
-              </div>
-              <Switch checked={requireApproval} onCheckedChange={setRequireApproval} />
-            </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">最小延时随机间隔 (秒)</label>
-                <input
+                <Label>最小延时随机间隔 (秒)</Label>
+                <Input
                   type="number"
                   min="0"
                   max="60"
                   value={minInterval}
                   onChange={(e) => setMinInterval(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="font-semibold text-muted-foreground">最大延时随机间隔 (秒)</label>
-                <input
+                <Label>最大延时随机间隔 (秒)</Label>
+                <Input
                   type="number"
                   min="0"
                   max="60"
                   value={maxInterval}
                   onChange={(e) => setMaxInterval(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 bg-transparent border border-input rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
             </div>
@@ -135,7 +124,7 @@ export function RiskControl({ audits }: RiskControlProps) {
         <div className="flex-1 overflow-y-auto space-y-4 pr-2 text-xs custom-scrollbar">
           {riskAudits.map((audit) => (
             <div key={audit.id} className="relative pl-6 pb-2 border-l border-border last:border-l-0">
-              <div className="absolute -left-[6px] top-0.5 w-3 h-3 rounded-full bg-background border-2 border-rose-500 flex items-center justify-center" />
+              <div className="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full bg-background border-2 border-rose-500 flex items-center justify-center" />
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <span className="font-mono text-rose-500">
@@ -151,9 +140,7 @@ export function RiskControl({ audits }: RiskControlProps) {
             </div>
           ))}
           {riskAudits.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              <p className="text-xs">暂无风控阻断事件</p>
-            </div>
+            <EmptyState title="暂无风控阻断事件" />
           )}
         </div>
       </Card>

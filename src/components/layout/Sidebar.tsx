@@ -1,4 +1,4 @@
-import { LayoutDashboard, UserCheck, ShieldAlert, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, UserCheck, ShieldAlert, FlaskConical, Radio } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ export const ROUTE_DEFINITIONS = [
   { path: '/dashboard', label: '系统看板', icon: LayoutDashboard },
   { path: '/accounts', label: '账号管理', icon: UserCheck },
   { path: '/risk', label: '风控管理', icon: ShieldAlert },
+  { path: '/upstream', label: '上游对接', icon: Radio },
   { path: '/test', label: '开发测试', icon: FlaskConical },
 ] as const;
 
@@ -36,7 +37,7 @@ export function Sidebar({
             <h2 className="text-sm font-bold text-foreground tracking-wide">WeChat RPA</h2>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[10px] text-muted-foreground font-semibold">
-                {user?.username || 'Guest'}
+                {user?.name || user?.phone || 'Guest'}
               </span>
               <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 leading-none shrink-0">
                 {user?.role || 'agent'}

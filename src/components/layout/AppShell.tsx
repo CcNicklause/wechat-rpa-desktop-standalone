@@ -6,6 +6,7 @@ const LeadsDashboard = lazy(() => import('../features/LeadsDashboard').then(m =>
 const AccountManagement = lazy(() => import('../features/AccountManagement').then(m => ({ default: m.AccountManagement })));
 const RiskControl = lazy(() => import('../features/RiskControl').then(m => ({ default: m.RiskControl })));
 const DevTesting = lazy(() => import('../features/DevTesting').then(m => ({ default: m.DevTesting })));
+const UpstreamConfig = lazy(() => import('../features/UpstreamConfig').then(m => ({ default: m.UpstreamConfig })));
 
 
 import { useLeadsQuery } from '@/hooks/useLeads';
@@ -81,6 +82,8 @@ export function AppShell() {
               return <AccountManagement />;
             case '/risk':
               return <RiskControl audits={audits} />;
+            case '/upstream':
+              return <UpstreamConfig />;
             case '/test':
               return <DevTesting />;
             default:
@@ -92,13 +95,13 @@ export function AppShell() {
   };
 
   return (
-    <div className="relative flex h-screen bg-background text-foreground overflow-hidden w-full transition-colors duration-300">
+    <div className="relative flex flex-1 min-h-0 bg-background text-foreground overflow-hidden w-full transition-colors duration-300">
       <Sidebar
         activePath={activePath}
         onNavigate={navigate}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden relative z-10 bg-muted/10">
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative z-10 bg-muted/10">
         <DashboardHeader />
         {renderRoute()}
       </main>

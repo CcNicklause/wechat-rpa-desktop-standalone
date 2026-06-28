@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDevTestStore, type JobSnapshot } from '@/stores/useDevTestStore';
 import { getLocalApiToken, LOCAL_API_BASE, requestLocalApi } from '@/lib/api';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 interface JobProgressProps {
   jobId: string;
@@ -136,7 +137,6 @@ export function JobProgress({ jobId, onComplete }: JobProgressProps) {
   const steps = snapshot?.steps ?? [];
   const status = snapshot?.status ?? 'QUEUED';
   const finished = TERMINAL_STATUSES.has(status);
-  const statusTone = toneFromStatus(status);
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3 flex flex-col flex-1 min-h-0">
@@ -145,7 +145,7 @@ export function JobProgress({ jobId, onComplete }: JobProgressProps) {
           {finished ? '✅ RPA 任务流水' : '⚡ RPA 引擎运行中'}
         </h3>
         <div className="flex items-center gap-2">
-          <StatusBadge status={status} tone={statusTone} />
+          <StatusBadge status={status} />
           {!finished && (
             <span className="relative inline-flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
@@ -204,31 +204,14 @@ function StepLine({ index, step }: { index: number; step: string }) {
   const colonAt = step.indexOf(':');
   const tag = colonAt > 0 ? step.slice(0, colonAt) : '';
   const text = colonAt > 0 ? step.slice(colonAt + 1).trim() : step;
-
-  const toneClass =
-    tone === 'success'
-      ? 'text-emerald-700 dark:text-emerald-400'
-      : tone === 'fail'
-        ? 'text-rose-600 dark:text-rose-400'
-        : tone === 'warn'
-          ? 'text-amber-600 dark:text-amber-400'
-          : 'text-foreground/80';
-
-  const tagBg =
-    tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-      : tone === 'fail'
-        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
-        : tone === 'warn'
-          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-          : 'bg-muted text-muted-foreground';
+  const palette = STEP_TONE_PALETTE[tone];
 
   return (
-    <div className={`flex gap-2 items-start ${toneClass}`}>
+    <div className={`flex gap-2 items-start ${palette.row}`}>
       <span className="text-muted-foreground select-none w-5 text-right shrink-0">{index + 1}.</span>
       {tag ? (
         <>
-          <span className={`px-1.5 py-px rounded text-[9.5px] font-bold shrink-0 ${tagBg}`}>{tag}</span>
+          <span className={`px-1.5 py-px rounded text-[9.5px] font-bold shrink-0 ${palette.tag}`}>{tag}</span>
           <span className="break-all">{text}</span>
         </>
       ) : (
@@ -238,26 +221,31 @@ function StepLine({ index, step }: { index: number; step: string }) {
   );
 }
 
-function StatusBadge({ status, tone }: { status: string; tone: 'success' | 'fail' | 'warn' | 'default' }) {
-  const toneClass =
-    tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-      : tone === 'fail'
-        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
-        : tone === 'warn'
-          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-          : 'bg-muted text-muted-foreground';
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${toneClass}`}>{status}</span>;
-}
+type StepTone = 'success' | 'fail' | 'warn' | 'default';
 
-function toneFromStatus(status: string): 'success' | 'fail' | 'warn' | 'default' {
-  if (status === 'SIMULATION_COMPLETED' || status === 'REAL_COMPLETED') return 'success';
-  if (status === 'FAILED') return 'fail';
-  if (status.startsWith('REAL_BIZ_')) return 'warn';
-  return 'default';
-}
+// step 行 / 行内 tag 共享一套色板，避免维护两份 if-else。
+// 注：行级是纯文本色，tag 还要带浅色背景，所以保留 row/tag 两栏；
+// 复用 Badge 会强制 rounded-full + text-xs，密集流水里会换行，因此不直接挂 Badge。
+const STEP_TONE_PALETTE: Record<StepTone, { row: string; tag: string }> = {
+  success: {
+    row: 'text-emerald-700 dark:text-emerald-400',
+    tag: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  },
+  fail: {
+    row: 'text-rose-600 dark:text-rose-400',
+    tag: 'bg-rose-500/15 text-rose-600 dark:text-rose-400',
+  },
+  warn: {
+    row: 'text-amber-600 dark:text-amber-400',
+    tag: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  },
+  default: {
+    row: 'text-foreground/80',
+    tag: 'bg-muted text-muted-foreground',
+  },
+};
 
-function stepTone(step: string): 'success' | 'fail' | 'warn' | 'default' {
+function stepTone(step: string): StepTone {
   // 失败/异常优先（即便后续重试成功，也希望这一行高亮，方便定位失败节点）
   if (/^(SYS_ERROR_RETRY|SYS_RPA_TIMEOUT|.*_NOT_FOUND|.*_MISS|.*_BLOCKED|.*_RISK|.*_REJECT|.*_FAILED)/i.test(step)) {
     if (/^.*_NOT_FOUND/i.test(step) && !/SYS_ERROR_RETRY/i.test(step)) return 'fail';

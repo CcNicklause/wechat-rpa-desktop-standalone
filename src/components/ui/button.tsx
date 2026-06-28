@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 const buttonVariants = cva(
   [
     'inline-flex items-center gap-1 justify-center whitespace-nowrap rounded-lg text-xs font-bold ring-offset-background transition',
-    'disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none active:shadow-inner',
+    'cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none active:shadow-inner',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0',
     'hover:enabled:opacity-90',
   ],

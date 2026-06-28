@@ -150,16 +150,110 @@ def check_friend_acceptance_by_phone(
             wechat_rpa.set_cancel_token(None)
 
 
+def probe_screen_state_for_retry(
+    phone: str,
+    *,
+    job_id: str | None = None,
+    cancel_token: threading.Event | None = None,
+) -> FriendAcceptanceCheckResult:
+    """重试前的轻量读屏核验（Cycle 2 需求 3）。
+
+    与 check_friend_acceptance_by_phone 的差别：
+    - 多识别一个 SEND_SUCCESS 状态（设计 §3）
+    - 调用方拿到 result.state 后自行决定要不要抛 RpaBusinessOutcome
+    - 不写任何 DB / 不发 audit；仅完成"看一眼"
+    """
+    # 复用既有路径：检测序加上 SEND_SUCCESS
+    state_keys = ["RISK_CONTROL", "TARGET_NOT_FOUND", "ALREADY_FRIEND", "SEND_SUCCESS"]
+
+    steps: list[str] = []
+
+    def mark(step: str) -> None:
+        steps.append(step)
+
+    wechat_rpa.set_cancel_token(cancel_token)
+    wx_window = None
+    target_window = None
+    try:
+        mark("RETRY_PRECHECK_STARTED: 重试前轻量核验当前对方状态")
+        wx_window = wechat_rpa._find_wechat_window()
+        if wx_window is None:
+            raise AppError(
+                "WECHAT_NOT_FOUND",
+                "未发现已登录的微信客户端；请确认微信窗口可见，且不是企业微信",
+            )
+
+        desktop = wechat_rpa.get_desktop_adapter()
+        desktop.set_active(wx_window)
+        desktop.set_topmost(wx_window, True)
+        wechat_rpa._sleep(0.3)
+
+        wechat_rpa._cleanup_stale_windows(mark)
+        wechat_rpa._open_add_friends_entry(None, wx_window, mark)
+
+        target_window = wechat_rpa._current_add_friend_target(wx_window=wx_window)
+        if target_window is not wx_window:
+            desktop.set_active(target_window)
+            desktop.set_topmost(target_window, True)
+            wechat_rpa._sleep(0.3)
+
+        search_box, input_method = wechat_rpa._focus_search_box(None, target_window, mark)
+        wechat_rpa._clear_and_type_target(None, search_box, input_method, phone)
+        wechat_rpa._press_enter(None, search_box, input_method)
+        wechat_rpa._sleep(2.0)
+
+        target_window = wechat_rpa._current_add_friend_target(wx_window=wx_window)
+        state = wechat_rpa._detect_screen_state(
+            target_window,
+            state_keys,
+            mark=mark,
+        )
+        if state:
+            mark(f"RETRY_PRECHECK_STATE: 命中 {state}")
+
+        matched_text = _last_ocr_text(steps)
+        return FriendAcceptanceCheckResult(
+            phone=phone,
+            accepted=state == "ALREADY_FRIEND",
+            state=state or "UNKNOWN",
+            matched_text=matched_text,
+            steps=steps,
+        )
+    finally:
+        try:
+            desktop = wechat_rpa.get_desktop_adapter()
+        except Exception:
+            desktop = None
+        try:
+            if target_window is not None and target_window is not wx_window:
+                try:
+                    desktop.close_window(target_window)
+                except Exception:
+                    pass
+            if wx_window is not None:
+                try:
+                    desktop.set_topmost(wx_window, False)
+                except Exception:
+                    pass
+        finally:
+            wechat_rpa.set_cancel_token(None)
+
+
 class FriendAcceptanceService:
     def __init__(
         self,
         store: SQLiteStore,
         audit: AuditLogger,
         checker: Callable[..., FriendAcceptanceCheckResult] = check_friend_acceptance_by_phone,
+        *,
+        max_attempts: int = 12,
+        risk_event_handler: Callable[..., None] | None = None,
     ) -> None:
         self.store = store
         self.audit = audit
         self.checker = checker
+        self.max_attempts = max(1, int(max_attempts))
+        self.risk_event_handler = risk_event_handler
 
     def check_lead(self, lead_id: str) -> dict:
         lead = self.store.get_lead(lead_id)
@@ -167,6 +261,7 @@ class FriendAcceptanceService:
             raise not_found("线索不存在")
 
         if lead["status"] == LeadStatus.WECHAT_ACCEPTED.value:
+            self.store.enqueue_friend_check_report(lead_id, True, now_iso())
             return {
                 "lead_id": lead_id,
                 "phone_masked": mask_phone(lead["phone"]),
@@ -188,13 +283,15 @@ class FriendAcceptanceService:
             job_id=f"lead_{lead_id}",
         )
         result_payload = result.to_dict(lead_id)
+        timestamp = now_iso()
 
         if result.accepted:
             self.store.update_lead(
                 lead_id,
                 status=LeadStatus.WECHAT_ACCEPTED.value,
-                updated_at=now_iso(),
+                updated_at=timestamp,
             )
+            self.store.enqueue_friend_check_report(lead_id, True, timestamp)
             self.audit.record(
                 "wechat.friend.accepted",
                 actor_id=lead["sales_id"],
@@ -207,13 +304,54 @@ class FriendAcceptanceService:
                 data=result_payload,
             )
         else:
+            attempts = int(lead.get("acceptance_attempts") or 0) + 1
+            next_status = LeadStatus.WECHAT_ADD_REQUESTED
+            upstream_status: str | None = None
+            if result.state == "RISK_CONTROL":
+                next_status = LeadStatus.WECHAT_RISK_CONTROL
+                upstream_status = "BIZ_RISK_CONTROL"
+            elif result.state == "TARGET_NOT_FOUND":
+                next_status = LeadStatus.WECHAT_TARGET_NOT_FOUND
+                upstream_status = "BIZ_TARGET_NOT_FOUND"
+            elif attempts >= self.max_attempts:
+                next_status = LeadStatus.WECHAT_ACCEPTANCE_EXHAUSTED
+                upstream_status = "BIZ_ACCEPTANCE_EXHAUSTED"
+
+            self.store.update_lead(
+                lead_id,
+                status=next_status.value,
+                acceptance_attempts=attempts,
+                updated_at=timestamp,
+            )
+            result_payload["acceptance_attempts"] = attempts
+
+            if upstream_status:
+                self.store.enqueue_lead_status_report(
+                    lead_id=lead_id,
+                    job_id=f"friend_acceptance_{lead_id}",
+                    upstream_status=upstream_status,
+                    remark=result.matched_text,
+                    error_details=None,
+                    payload={
+                        "lead_id": lead_id,
+                        "source": "friend_acceptance",
+                        "state": result.state,
+                        "acceptance_attempts": attempts,
+                    },
+                    timestamp=timestamp,
+                )
+            if result.state == "RISK_CONTROL":
+                self.store.enqueue_friend_check_report(lead_id, False, timestamp)
+                if self.risk_event_handler:
+                    self.risk_event_handler(reason="BIZ_RISK_CONTROL")
+
             self.audit.record(
                 "wechat.friend.acceptance_checked",
                 actor_id=lead["sales_id"],
                 lead_id=lead_id,
                 phone_masked=mask_phone(lead["phone"]),
                 rpa_mode="real",
-                result="pending",
+                result="terminal" if upstream_status else "pending",
                 reason_code=result.state,
                 message=result.matched_text,
                 data=result_payload,
@@ -269,19 +407,29 @@ class FriendAcceptanceRecheckWorker:
         *,
         batch_size: int = 3,
         interval_seconds: int = 300,
+        max_attempts: int = 12,
+        risk_event_handler: Callable[..., None] | None = None,
         checker: Callable[..., FriendAcceptanceCheckResult] = check_friend_acceptance_by_phone,
     ) -> None:
         self.store = store
         self.audit = audit
         self.batch_size = max(1, min(int(batch_size), 10))
         self.interval_seconds = max(30, int(interval_seconds))
+        self.max_attempts = max(1, int(max_attempts))
+        self.risk_event_handler = risk_event_handler
         self.checker = checker
 
     def run_once(self) -> dict:
         try:
             with runtime_guard.single_task():
                 with _com_context():
-                    service = FriendAcceptanceService(self.store, self.audit, checker=self.checker)
+                    service = FriendAcceptanceService(
+                        self.store,
+                        self.audit,
+                        checker=self.checker,
+                        max_attempts=self.max_attempts,
+                        risk_event_handler=self.risk_event_handler,
+                    )
                     return service.check_pending(self.batch_size)
         except AppError as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {}
@@ -313,7 +461,13 @@ _recheck_thread: threading.Thread | None = None
 _recheck_stop_event: threading.Event | None = None
 
 
-def start_friend_acceptance_rechecker(settings, store: SQLiteStore, audit: AuditLogger) -> bool:
+def start_friend_acceptance_rechecker(
+    settings,
+    store: SQLiteStore,
+    audit: AuditLogger,
+    *,
+    risk_event_handler: Callable[..., None] | None = None,
+) -> bool:
     if not getattr(settings, "friend_acceptance_recheck_enabled", True):
         return False
     if getattr(settings, "rpa_mode", "simulation") != "real":
@@ -329,6 +483,8 @@ def start_friend_acceptance_rechecker(settings, store: SQLiteStore, audit: Audit
             audit=audit,
             batch_size=getattr(settings, "friend_acceptance_recheck_batch_size", 3),
             interval_seconds=getattr(settings, "friend_acceptance_recheck_interval_seconds", 300),
+            max_attempts=getattr(settings, "friend_acceptance_max_attempts", 12),
+            risk_event_handler=risk_event_handler,
         )
         _recheck_thread = threading.Thread(
             target=worker.run_forever,
