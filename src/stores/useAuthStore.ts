@@ -54,12 +54,31 @@ function normalizeLoginError(error: unknown): string {
   return message;
 }
 
+/**
+ * 已为当前 access_token 调用过 terminal_initialize 的标记，避免 React StrictMode
+ * 或 session 恢复链路把 record/status=online 重复发到 MGR。
+ * 同一 token + 同一 tenant_id 视为同一会话；token 变化（重新登录、刷新）会再次触发。
+ */
+let lastInitializedToken: string | null = null;
+
 function applySession(set: (partial: Partial<AuthState>) => void, session: PortalSession) {
   set({
     user: session.user,
     status: 'authenticated',
     isAuthenticated: true,
     error: null,
+  });
+  // 终端上报初始化：fire-and-forget，失败不阻断登录链路。
+  // 同 token 去重：StrictMode 双跑 effect / 同步登录态时不会重复打 record/status。
+  if (lastInitializedToken === session.access_token) {
+    return;
+  }
+  lastInitializedToken = session.access_token;
+  void invoke('terminal_initialize', { session }).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.warn('[terminal_initialize] 调用失败', error);
+    // 失败时清掉去重标记，让下一次 applySession 可重试。
+    lastInitializedToken = null;
   });
 }
 
@@ -133,6 +152,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await invoke('portal_logout');
     } finally {
+      lastInitializedToken = null;
       set({ user: null, status: 'anonymous', isAuthenticated: false, error: null });
     }
   },
