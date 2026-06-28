@@ -33,7 +33,7 @@
 ## 后续拆分
 
 - 生产 Portal API base URL 后续发布前确认；当前默认使用 QA：`http://aisales-portal.app.qa.internal.weimob.com/api/v1`。
-- MGR 终端记录、心跳、状态变更后续单独推进。
+- MGR 终端记录、心跳、状态变更已拆分到 [rpa-terminal-reporting](../rpa-terminal-reporting/state.md)。
 
 ## 本轮结果
 
