@@ -4,8 +4,8 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/common/StatusBadge';
+import { LOCAL_API_BASE } from '@/lib/api';
 
 export function UpstreamConfig() {
   const {
@@ -27,7 +27,7 @@ export function UpstreamConfig() {
 
   // 2. 初始化监听 SSE 日志流
   useEffect(() => {
-    const eventSource = new EventSource('http://127.0.0.1:8000/api/v1/upstream/logs');
+    const eventSource = new EventSource(`${LOCAL_API_BASE}/api/v1/upstream/logs`);
     eventSource.onmessage = (event) => {
       addLog(event.data);
     };
@@ -68,7 +68,9 @@ export function UpstreamConfig() {
             <div className="space-y-2">
               <span className="text-xs font-semibold text-muted-foreground">运行模式</span>
               <div className="flex items-center gap-6">
-                <Label className="flex items-center gap-2 cursor-pointer">
+                {/* 这里不能用 <Label>：Label 默认带 text-muted-foreground，
+                    会把内层 span 一并染成灰色。radio 行 span 自己保持 text-foreground。 */}
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="upstream_mode"
@@ -77,9 +79,9 @@ export function UpstreamConfig() {
                     onChange={() => saveConfig({ upstream_mode: 'mock' })}
                     className="h-4 w-4 accent-primary"
                   />
-                  <span className="text-xs">Mock 本地模拟模式</span>
-                </Label>
-                <Label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-xs text-foreground">Mock 本地模拟模式</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="upstream_mode"
@@ -88,8 +90,8 @@ export function UpstreamConfig() {
                     onChange={() => saveConfig({ upstream_mode: 'real' })}
                     className="h-4 w-4 accent-primary"
                   />
-                  <span className="text-xs">Real 真实网络模式</span>
-                </Label>
+                  <span className="text-xs text-foreground">Real 真实网络模式</span>
+                </label>
               </div>
             </div>
 
@@ -99,7 +101,6 @@ export function UpstreamConfig() {
                 type="text"
                 defaultValue={config.upstream_api_url}
                 onBlur={(e) => saveConfig({ upstream_api_url: e.target.value })}
-                className="h-9 text-sm"
                 placeholder="http://localhost:8000/api/v1/upstream"
               />
             </div>

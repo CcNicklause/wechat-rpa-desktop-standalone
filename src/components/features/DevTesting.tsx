@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldError } from '@/components/common/FieldError';
 import { EmptyState } from '@/components/common/EmptyState';
+import { StatusBadge } from '@/components/common/StatusBadge';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { useDevTestStore } from '@/stores/useDevTestStore';
@@ -829,13 +830,11 @@ export function DevTesting() {
                       </span>
                       <span className="text-muted-foreground font-mono"> · {report.lead_id}</span>
                     </span>
-                    <Badge
-                      variant={report.status === 'SENT' ? 'success' : report.status === 'FAILED' ? 'failed' : 'pending'}
+                    <StatusBadge
+                      status={report.status}
                       showDot
                       className="shrink-0 text-[10px]"
-                    >
-                      {report.status}
-                    </Badge>
+                    />
                   </div>
                 ))}
               </div>
@@ -936,17 +935,16 @@ function AuditEventList({
   );
 }
 
+const META_TONE_VARIANT: Record<'default' | 'success' | 'warn' | 'fail', 'secondary' | 'success' | 'pending' | 'failed'> = {
+  default: 'secondary',
+  success: 'success',
+  warn: 'pending',
+  fail: 'failed',
+};
+
 function MetaPill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'fail' }) {
-  const variant =
-    tone === 'success'
-      ? 'success'
-      : tone === 'warn'
-        ? 'pending'
-        : tone === 'fail'
-          ? 'failed'
-          : 'secondary';
   return (
-    <Badge variant={variant} className="px-1.5 py-0.5 text-[10px]">
+    <Badge variant={META_TONE_VARIANT[tone]} className="px-1.5 py-0.5 text-[10px]">
       {children}
     </Badge>
   );

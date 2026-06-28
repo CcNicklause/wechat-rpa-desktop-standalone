@@ -85,16 +85,35 @@ export const useUpstreamStore = create<UpstreamStoreState>((set, get) => ({
     }
   },
 
+  // 三个开发触发按钮都在 UI 上以 onClick 直接挂 store action，
+  // 而 requestLocalApi 在非 2xx 时会抛错（比如调度器未就绪返回 400）。
+  // 如果不在这里 catch，就会变成 unhandled promise rejection，
+  // 用户点了按钮看不到任何反馈。统一把异常转成本地日志，让调试控制台能看到。
   triggerFetch: async () => {
-    await requestLocalApi('/api/v1/upstream/dev/trigger-fetch', { method: 'POST' });
+    try {
+      await requestLocalApi('/api/v1/upstream/dev/trigger-fetch', { method: 'POST' });
+      get().addLog('[dev] trigger-fetch 已发送');
+    } catch (e) {
+      get().addLog(`[dev] trigger-fetch 失败: ${(e as Error).message}`);
+    }
   },
 
   triggerHeartbeat: async () => {
-    await requestLocalApi('/api/v1/upstream/dev/trigger-heartbeat', { method: 'POST' });
+    try {
+      await requestLocalApi('/api/v1/upstream/dev/trigger-heartbeat', { method: 'POST' });
+      get().addLog('[dev] trigger-heartbeat 已发送');
+    } catch (e) {
+      get().addLog(`[dev] trigger-heartbeat 失败: ${(e as Error).message}`);
+    }
   },
 
   clearQueue: async () => {
-    await requestLocalApi('/api/v1/upstream/dev/clear-queue', { method: 'POST' });
+    try {
+      await requestLocalApi('/api/v1/upstream/dev/clear-queue', { method: 'POST' });
+      get().addLog('[dev] clear-queue 已发送');
+    } catch (e) {
+      get().addLog(`[dev] clear-queue 失败: ${(e as Error).message}`);
+    }
   },
 
   addLog: (log) =>
