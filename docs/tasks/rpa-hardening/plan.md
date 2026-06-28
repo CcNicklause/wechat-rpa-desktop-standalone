@@ -1,6 +1,6 @@
 # RPA 加微链路 P0/P1 加固方案
 
-> 范围：见 `docs/orchestrator-state.md`，**仅** P0 ①②③ + P1 ④⑤⑥⑦
+> 范围：见 `docs/tasks/rpa-hardening/state.md`，**仅** P0 ①②③ + P1 ④⑤⑥⑦
 > 不在范围：P2 前端 UX、密码 API 实装、SSE 鉴权改造
 > 文档对象：coder-agent / 测试 / 复盘
 > 编排约束：CLAUDE.md §22-50 轻量模板，一份合一文档
@@ -579,7 +579,7 @@ def startup():
 ## 第四部分 · 对账与优化清单（plan vs flow）
 
 > 对账时间：2026-06-28
-> 对账对象：`docs/rpa-hardening-plan.md` 设计章节 / 测试清单 vs `docs/rpa-hardening-flow.md` 实际落地说明
+> 对账对象：`docs/tasks/rpa-hardening/plan.md` 设计章节 / 测试清单 vs `docs/tasks/rpa-hardening/flow.md` 实际落地说明
 
 ### 总体结论
 

@@ -19,19 +19,29 @@
 
 ## 文档约定
 
-所有产出物放 `docs/` 下。**默认走轻量模板**，重模板仅在显式声明时启用。
+所有产出物放 `docs/` 下。**大任务型需求必须按任务线目录组织**，默认走轻量模板；重模板仅在显式声明时启用。
 
 ### 默认（轻量）— 大部分迭代用这套
 
 ```
 docs/
-├── orchestrator-state.md             # 当前流程进度，每个节点完成后更新
-├── {topic}-plan.md                   # 需求 + 技术设计 + 测试清单 合一
-├── {topic}-flow.md                   # 功能流程文档（反映代码现状，对照 plan 的设计部分）
-└── {topic}-test.md                   # 测试报告（test-agent 产出）
+└── tasks/
+    ├── README.md
+    └── {task-line}/
+        ├── state.md                  # 当前流程进度，每个节点完成后更新
+        ├── plan.md                   # 需求 + 技术设计 + 测试清单 合一
+        ├── flow.md                   # 功能流程文档（反映代码现状，对照 plan 的设计部分）
+        └── test.md                   # 测试报告（test-agent 产出；需要时创建）
 ```
 
-`{topic}` 用一个连字符短语命名本次迭代（例如 `rpa-hardening`、`friend-acceptance-v2`），不带版本号。一次迭代结束 3 份文档归档到 `docs/archive/` 保留历史，下次迭代用同样的 3 份再开一轮。
+`{task-line}` 用一个稳定的连字符短语命名长期任务线（例如 `rpa-hardening`、`upstream-integration`、`operator-dashboard`），不带版本号。
+
+使用规则：
+- 用户指定已有任务线时，继续更新 `docs/tasks/{task-line}/` 下的文档。
+- 新的大主题或跨模块改造，先新建 `docs/tasks/{task-line}/`，从 `docs/tasks/_template/` 复制 `plan.md`、`flow.md`、`state.md`。
+- 同一任务线的新阶段继续追加 Cycle，不另建根目录文件。
+- 小修小补不强制创建任务线；但如果影响已有大任务线，需要同步更新对应 `flow.md` 或 `state.md`。
+- `docs/tasks/README.md` 是任务线索引；新建或完成任务线时同步更新。
 
 ### 重模板（拆分）— 仅在以下场景启用，需在 `/orchestrate` 命令里加 `--full-docs`
 
@@ -40,17 +50,17 @@ docs/
 - 拆 dev cycle 多于 3 个，或预计 5 工人日以上
 - 团队 review 需要分文档签字
 
-重模板恢复成：`requirements.md` / `technical-design.md` / `dev-cycles.md` / `dev-cycle-{N}.md` / `feature-flow-v{N}.md` / `optimization-checklist-v{N}.md` / `test-checklist-v{N}.md` / `test-report-v{N}.md`。版本号 `v{N}` 仅在重模板里启用。
+重模板放在 `docs/tasks/{task-line}/` 下，恢复成：`requirements.md` / `technical-design.md` / `dev-cycles.md` / `dev-cycle-{N}.md` / `feature-flow-v{N}.md` / `optimization-checklist-v{N}.md` / `test-checklist-v{N}.md` / `test-report-v{N}.md`。版本号 `v{N}` 仅在重模板里启用。
 
 ### 老项目场景
 
-老项目沿用 `-{service}-{module}` 后缀规则（轻、重模板都适用）。
+老项目的任务线命名可以带 service/module 语义，例如 `rpa-hardening`、`upstream-sync`、`frontend-workbench`。轻、重模板都放在对应任务线目录内。
 
 ## 关键工作流原则
 
 ### 文档对账机制
-- plan-agent 写的设计（轻模板里是 `{topic}-plan.md` 的设计章节；重模板里是 `technical-design.md`）= 期望
-- coder-agent 写的 `{topic}-flow.md` / `feature-flow-v{N}.md` = 事实
+- plan-agent 写的设计（轻模板里是 `docs/tasks/{task-line}/plan.md` 的设计章节；重模板里是 `technical-design.md`）= 期望
+- coder-agent 写的 `docs/tasks/{task-line}/flow.md` / `feature-flow-v{N}.md` = 事实
 - 两者 diff 出优化清单 → 循环到收敛
 
 **coder-agent 绝不能把设计文档复述一遍当功能流程文档**，否则永远收敛不了。
@@ -83,4 +93,4 @@ orchestrator 默认只在以下 3 种情况打断我：
 - 紧急 hotfix → 直接做，但改完提醒我同步更新 feature-flow 文档
 
 ## 项目特定信息
--参考 docs/项目文档索引.md
+- 参考 `docs/项目文档索引.md` 和 `docs/tasks/README.md`

@@ -1,0 +1,33 @@
+# 任务线索引
+
+大任务型需求按任务线目录维护。每条任务线至少包含：
+
+- `plan.md`：需求、设计、测试清单。
+- `flow.md`：代码真实落地后的功能流程与偏差说明。
+- `state.md`：当前编排节点、状态、测试结果与下一步。
+- `test.md`：测试报告，需要 test-agent 独立产出时创建。
+
+## 使用规则
+
+- 继续已有任务：直接更新对应 `docs/tasks/<task-line>/`。
+- 新的大主题：从 `docs/tasks/_template/` 复制三件套并改名。
+- 小修小补：不强制建任务线；如果影响已有任务线，需要同步更新对应 `flow.md` 或 `state.md`。
+- 每次完成大任务后，在本索引更新状态与摘要。
+
+## 当前任务线
+
+| 任务线 | 状态 | 说明 | 入口 |
+|---|---|---|---|
+| `rpa-hardening` | DONE | RPA 加微链路 P0/P1 加固，103 个后端测试通过 | [state.md](rpa-hardening/state.md) |
+
+## 可选任务线示例
+
+| 任务线 | 适用场景 |
+|---|---|
+| `upstream-integration` | 上游客户池、状态同步、错误码兼容、token 生命周期 |
+| `operator-dashboard` | 运营后台、outbox 积压告警、手动补偿、冻结状态可视化 |
+| `rpa-observability` | 审计事件、结构化日志、截图追踪、失败原因聚合 |
+| `desktop-packaging` | Tauri/Python 打包、配置加载、自动更新、Windows 权限 |
+| `security-hardening` | API token、SSE 鉴权、敏感信息脱敏、本地接口访问控制 |
+| `data-migration` | SQLite schema 版本、迁移记录、旧库兼容、修复脚本 |
+| `frontend-workbench` | 销售工作台、任务详情、人工确认 UX、错误提示 |

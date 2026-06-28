@@ -1,6 +1,6 @@
-# RPA 加微链路加固 · 实际功能流程
+﻿# RPA 加微链路加固 · 实际功能流程
 
-> 反映代码现状，**不**复述设计文档。设计期望见 [docs/rpa-hardening-plan.md](rpa-hardening-plan.md)。
+> 反映代码现状，**不**复述设计文档。设计期望见 [plan.md](plan.md)。
 > 对账机制：plan-agent 用本文档 vs plan 设计章节 diff → 出优化清单。
 
 ---
@@ -9,7 +9,7 @@
 
 ### 1. lead_status_reports outbox（需求 2）
 
-**新增表**：[python/backend/app/storage/sqlite_store.py:97-110](../python/backend/app/storage/sqlite_store.py#L97-L110)
+**新增表**：[python/backend/app/storage/sqlite_store.py:97-110](../../../python/backend/app/storage/sqlite_store.py#L97-L110)
 ```
 TABLE lead_status_reports (
   lead_id, job_id, upstream_status, remark, error_details,
@@ -20,14 +20,14 @@ TABLE lead_status_reports (
 ```
 主键按设计取 `(lead_id, job_id)`；重复 enqueue 走 `ON CONFLICT ... DO UPDATE`，状态从 SENT **不退回** PENDING（与 friend_check_reports 一致）。
 
-**Store 新增 4 个方法**（[sqlite_store.py:480-625](../python/backend/app/storage/sqlite_store.py)）：
+**Store 新增 4 个方法**（[sqlite_store.py:480-625](../../../python/backend/app/storage/sqlite_store.py)）：
 - `enqueue_lead_status_report(...)` — UPSERT
 - `list_pending_lead_status_reports(limit)` — 按 `updated_at ASC`，limit clamp 1–200
 - `mark_lead_status_report_sent(lead_id, job_id, timestamp)`
 - `mark_lead_status_report_failed(lead_id, job_id, error, timestamp, *, max_attempts=8)` — `attempts+1 >= max_attempts THEN FAILED`
 
 **Scheduler 接入**：
-- `_worker_loop` 不再调用 `self.client.report_lead_status(...)`，改走 `self._enqueue_lead_status_report(...)` ([upstream_scheduler.py:378-396](../python/backend/app/services/upstream_scheduler.py#L378))
+- `_worker_loop` 不再调用 `self.client.report_lead_status(...)`，改走 `self._enqueue_lead_status_report(...)` ([upstream_scheduler.py:378-396](../../../python/backend/app/services/upstream_scheduler.py#L378))
 - 严重异常分支也走 outbox：`job_id` 取当前 job_id，缺失时落 `orch_error_{lead_id}` 占位
 - 新增 `_lead_status_report_loop` 守护线程，间隔 `lead_status_report_interval_seconds`（默认 **30s**）
 - 新增 `_report_lead_status_once()`：批量拉 PENDING → `client.report_lead_status(...)` → 成功 mark_sent / 失败 mark_failed，attempts 累计；达上限 `lead_status_report_max_attempts`（默认 **8**）→ FAILED 死信，不再返出
@@ -37,18 +37,18 @@ TABLE lead_status_reports (
 **与设计的实际偏差**：
 - ✅ 主键、状态机、守护线程间隔、max_attempts 全部按设计
 - ⚠️ 设计写"路由 dev 触发是 `/dev/lead-status-report/run`"，实际落地为 `/dev/trigger-lead-status-report`，与 friend-check 路由命名风格保持一致（`/dev/trigger-*`）
-- ⚠️ 设计未明示"outbox 入队本身失败时怎么办"，实际做法：try/except 后只 log，不阻塞 worker 流程（[upstream_scheduler.py:329-339](../python/backend/app/services/upstream_scheduler.py)）
+- ⚠️ 设计未明示"outbox 入队本身失败时怎么办"，实际做法：try/except 后只 log，不阻塞 worker 流程（[upstream_scheduler.py:329-339](../../../python/backend/app/services/upstream_scheduler.py)）
 
 ### 2. HTTP add_wechat per-lead 互斥（需求 4）
 
-**新增异常**：`LeadBusyError(lead_id, existing_job_id, existing_status)`（[sqlite_store.py:8-19](../python/backend/app/storage/sqlite_store.py#L8))
+**新增异常**：`LeadBusyError(lead_id, existing_job_id, existing_status)`（[sqlite_store.py:8-19](../../../python/backend/app/storage/sqlite_store.py#L8))
 
-**新增 Store 方法**：`create_job_if_lead_idle(job, busy_statuses)` ([sqlite_store.py:181-219](../python/backend/app/storage/sqlite_store.py#L181))
+**新增 Store 方法**：`create_job_if_lead_idle(job, busy_statuses)` ([sqlite_store.py:181-219](../../../python/backend/app/storage/sqlite_store.py#L181))
 - 走 `BEGIN IMMEDIATE` 持写锁
 - 查 `lead_id` + `status IN busy_statuses` 命中即 `ROLLBACK` 抛 `LeadBusyError`
 - 未命中则原子 INSERT
 
-**Orchestrator 接入**：`add_wechat` 的 `store.create_job(job)` 替换为 `create_job_if_lead_idle(job, _BUSY_JOB_STATUSES)`（[rpa_orchestrator.py:109-132](../python/backend/app/services/rpa_orchestrator.py))
+**Orchestrator 接入**：`add_wechat` 的 `store.create_job(job)` 替换为 `create_job_if_lead_idle(job, _BUSY_JOB_STATUSES)`（[rpa_orchestrator.py:109-132](../../../python/backend/app/services/rpa_orchestrator.py))
 - `_BUSY_JOB_STATUSES = ("REAL_QUEUED","REAL_RUNNING","SIMULATION_QUEUED","SIMULATION_RUNNING")`
 - 命中 → audit `rpa.blocked.lead_busy` → 抛 `AppError("RPA_LEAD_BUSY", ..., http_status.HTTP_409_CONFLICT)`
 
@@ -58,7 +58,7 @@ TABLE lead_status_reports (
 
 ### 3. 401 自动续签（需求 6）
 
-**RealUpstreamClient 重写**（[upstream_client.py:82-203](../python/backend/app/services/upstream_client.py#L82))：
+**RealUpstreamClient 重写**（[upstream_client.py:82-203](../../../python/backend/app/services/upstream_client.py#L82))：
 - 新增 `_login_lock: threading.Lock` 和 `_token_version: int`
 - 公开 `login()` 持锁后调 `_login_locked()`；后者负责实际 HTTP + 自增版本号
 - 新增 `_call_with_relogin(do_request)` 统一包装：
@@ -74,7 +74,7 @@ TABLE lead_status_reports (
 
 ---
 
-## Cycle 1 配置项落地（[core/config.py:23-27](../python/backend/app/core/config.py#L23))
+## Cycle 1 配置项落地（[core/config.py:23-27](../../../python/backend/app/core/config.py#L23))
 
 ```python
 lead_status_report_interval_seconds: int = Field(default=30, ge=5, le=86400)
@@ -113,55 +113,55 @@ lead_status_report_max_attempts: int = Field(default=8, ge=1, le=50)
 
 ### 1. RISK_FROZEN 调度器状态（需求 1）
 
-**新增 settings**：[python/backend/app/core/config.py:19-25](../python/backend/app/core/config.py#L19)
+**新增 settings**：[python/backend/app/core/config.py:19-25](../../../python/backend/app/core/config.py#L19)
 - `rpa_retry_precheck_enabled: bool = True`
 - `rpa_retry_precheck_timeout_seconds: int = 30`（保留，本轮未使用）
 - `risk_freeze_seconds: int = 7200`（默认 2h，范围 60–86400）
 
-**UpstreamScheduler 扩展**（[upstream_scheduler.py:99-117](../python/backend/app/services/upstream_scheduler.py))：
+**UpstreamScheduler 扩展**（[upstream_scheduler.py:99-117](../../../python/backend/app/services/upstream_scheduler.py))：
 - 新增字段：`_freeze_lock: RLock`, `_freeze_until: float | None`, `_last_risk_at: str | None`
 - 注释明确：`status_state` 与 `RISK_FROZEN` 是**维度叠加**——只要 `_freeze_until > monotonic()` 心跳/接口都报 RISK_FROZEN
 - 新增公开 API：
-  - `is_frozen() -> bool` —— 内含到期自动清零的副作用（[L163-L171](../python/backend/app/services/upstream_scheduler.py#L163))
+  - `is_frozen() -> bool` —— 内含到期自动清零的副作用（[L163-L171](../../../python/backend/app/services/upstream_scheduler.py#L163))
   - `get_frozen_remaining_seconds() -> float`
   - `_compute_status_state() -> str` —— 心跳/路由读取
   - `notify_risk_event(*, reason='BIZ_RISK_CONTROL')` —— 由 orchestrator 注入回调
   - `unfreeze(*, reason='manual') -> bool` —— dev API 提前解冻
 
 **接入点**：
-- `_heartbeat_action`：状态值改读 `_compute_status_state()`（[L353-L363](../python/backend/app/services/upstream_scheduler.py))
-- `_worker_loop`：从队列拿到 item 后若 `is_frozen()` → 原样回插 + `_stop_event.wait(min(30, remaining))`（[L386-L399](../python/backend/app/services/upstream_scheduler.py))
-- `PollingLeadSource.run`：接受 `is_frozen` 回调，冻结期间跳过 fetch 但保持节拍（[upstream_lead_source.py:39-49](../python/backend/app/services/upstream_lead_source.py))
+- `_heartbeat_action`：状态值改读 `_compute_status_state()`（[L353-L363](../../../python/backend/app/services/upstream_scheduler.py))
+- `_worker_loop`：从队列拿到 item 后若 `is_frozen()` → 原样回插 + `_stop_event.wait(min(30, remaining))`（[L386-L399](../../../python/backend/app/services/upstream_scheduler.py))
+- `PollingLeadSource.run`：接受 `is_frozen` 回调，冻结期间跳过 fetch 但保持节拍（[upstream_lead_source.py:39-49](../../../python/backend/app/services/upstream_lead_source.py))
 - `lead_source` 实例化时传 `is_frozen=self.is_frozen`
 
-**dev 路由**：`POST /api/v1/upstream/dev/scheduler/unfreeze` ([api/routes/upstream.py:46-54](../python/backend/app/api/routes/upstream.py))
+**dev 路由**：`POST /api/v1/upstream/dev/scheduler/unfreeze` ([api/routes/upstream.py:46-54](../../../python/backend/app/api/routes/upstream.py))
 **`/status` 接口**：增加 `frozen_remaining_seconds` 字段；`state` 字段改读 `_compute_status_state()`。
 
 **与设计的偏差**：
 - ✅ 内存态 + monotonic 时间、2 小时默认、重复触发不延长、自动到期、dev unfreeze 全按设计
-- ⚠️ 设计的"orchestrator_factory 增参传入 callable" 实际方案：`RpaOrchestrator.__init__` 新增 `risk_event_handler` 关键字参数（[rpa_orchestrator.py:38-58](../python/backend/app/services/rpa_orchestrator.py)），由 `main.py` startup 时先创建 scheduler、再用它的 `notify_risk_event` 注入到 orchestrator_factory（[main.py:60-80](../python/backend/app/main.py))。HTTP 路径走 `deps.get_rpa_orchestrator` 也注入同一 scheduler 引用。
+- ⚠️ 设计的"orchestrator_factory 增参传入 callable" 实际方案：`RpaOrchestrator.__init__` 新增 `risk_event_handler` 关键字参数（[rpa_orchestrator.py:38-58](../../../python/backend/app/services/rpa_orchestrator.py)），由 `main.py` startup 时先创建 scheduler、再用它的 `notify_risk_event` 注入到 orchestrator_factory（[main.py:60-80](../../../python/backend/app/main.py))。HTTP 路径走 `deps.get_rpa_orchestrator` 也注入同一 scheduler 引用。
 - ⚠️ heartbeat 上报字段直接复用 `status` 而非新增字段——与上游协议一致；上游若不识别 `RISK_FROZEN` 会被当 `BUSY` 解释（已在设计 §1 兼容性说明）
 
 ### 2. RPA 重试前核验（需求 3）
 
-**新增模块函数**：[friend_acceptance.py:153-228](../python/backend/app/services/friend_acceptance.py)
+**新增模块函数**：[friend_acceptance.py:153-228](../../../python/backend/app/services/friend_acceptance.py)
 - `probe_screen_state_for_retry(phone, *, job_id=None, cancel_token=None)`
   - 状态序：`["RISK_CONTROL", "TARGET_NOT_FOUND", "ALREADY_FRIEND", "SEND_SUCCESS"]`
   - **不写 DB / 不发 audit**，只完成"看一眼"
   - 失败抛 AppError；命中状态由调用方判断
 
 **RpaOrchestrator 接入**：
-- `__init__` 新增 `retry_precheck` kwarg（[rpa_orchestrator.py:38-58](../python/backend/app/services/rpa_orchestrator.py)）
-- `_run_job` 在 `attempt > 0` 时调一次核验（[L194-L221](../python/backend/app/services/rpa_orchestrator.py)）：
+- `__init__` 新增 `retry_precheck` kwarg（[rpa_orchestrator.py:38-58](../../../python/backend/app/services/rpa_orchestrator.py)）
+- `_run_job` 在 `attempt > 0` 时调一次核验（[L194-L221](../../../python/backend/app/services/rpa_orchestrator.py)）：
   - 命中 `RpaBusinessOutcome` → 外层 `except RpaBusinessOutcome` 收尾走 `_finalize_business_outcome`
   - 系统级 `Exception` → 仅 `update_step('SYS_RETRY_PRECHECK_FAILED: ...')`，重试链路继续
-- `_OUTCOME_LEAD_STATUS` 新增 `BIZ_ALREADY_REQUESTED → WECHAT_ADD_REQUESTED`（[L324-L331](../python/backend/app/services/rpa_orchestrator.py)）
-- `_finalize_business_outcome` 在 `circuit_break=True` 时调用 `self.risk_event_handler(outcome.code)`（[L361-L368](../python/backend/app/services/rpa_orchestrator.py)）
+- `_OUTCOME_LEAD_STATUS` 新增 `BIZ_ALREADY_REQUESTED → WECHAT_ADD_REQUESTED`（[L324-L331](../../../python/backend/app/services/rpa_orchestrator.py)）
+- `_finalize_business_outcome` 在 `circuit_break=True` 时调用 `self.risk_event_handler(outcome.code)`（[L361-L368](../../../python/backend/app/services/rpa_orchestrator.py)）
 
 **上游映射**：
-- `JOB_STATUS_UPSTREAM_STATUS["REAL_BIZ_ALREADY_REQUESTED"] = "REAL_SENT"`（[upstream_scheduler.py:31-39](../python/backend/app/services/upstream_scheduler.py))
+- `JOB_STATUS_UPSTREAM_STATUS["REAL_BIZ_ALREADY_REQUESTED"] = "REAL_SENT"`（[upstream_scheduler.py:31-39](../../../python/backend/app/services/upstream_scheduler.py))
 
-**main.py 注入** ([main.py:62-91](../python/backend/app/main.py))：
+**main.py 注入** ([main.py:62-91](../../../python/backend/app/main.py))：
 - 定义 `_retry_precheck(lead, greeting, update_step)` 包装 `probe_screen_state_for_retry`
 - 命中映射：`ALREADY_FRIEND → BIZ_ALREADY_FRIEND`、`SEND_SUCCESS → BIZ_ALREADY_REQUESTED`、`RISK_CONTROL → BIZ_RISK_CONTROL(circuit_break=True)`
 - `orchestrator_factory` 同时注入 `risk_event_handler` 和 `retry_precheck`
@@ -174,7 +174,7 @@ lead_status_report_max_attempts: int = Field(default=8, ge=1, le=50)
 
 ## Cycle 2 测试覆盖
 
-新增 [test_risk_frozen_and_retry_precheck.py](../python/backend/app/tests/test_risk_frozen_and_retry_precheck.py)，**13 个用例全绿**：
+新增 [test_risk_frozen_and_retry_precheck.py](../../../python/backend/app/tests/test_risk_frozen_and_retry_precheck.py)，**13 个用例全绿**：
 
 | 分组 | 用例 |
 |---|---|
@@ -249,3 +249,4 @@ $env:PYTHONPATH='.'; uv run pytest backend/app/tests
 **结果**：101 passed，4 个 FastAPI `on_event` deprecation warnings（既有框架弃用提醒，本轮不改）。
 
 STATUS: READY_FOR_REVIEW（Cycle 3）
+
