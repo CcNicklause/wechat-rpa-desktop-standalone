@@ -109,6 +109,7 @@ export function DevTesting() {
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [simulatingLeadId, setSimulatingLeadId] = useState<string | null>(null);
   const [flushingReports, setFlushingReports] = useState(false);
+  const [clearingPendingFriendLeads, setClearingPendingFriendLeads] = useState(false);
   const [manualFriendAccount, setManualFriendAccount] = useState('');
   const [manualFriendName, setManualFriendName] = useState('');
   const [manualSimulating, setManualSimulating] = useState(false);
@@ -298,6 +299,47 @@ export function DevTesting() {
       });
     } finally {
       setFlushingReports(false);
+    }
+  };
+
+  const clearPendingFriendLeads = async () => {
+    if (pendingFriendLeads.length === 0) {
+      toast({
+        title: '暂无待清理线索',
+        description: '当前没有 WECHAT_ADD_REQUESTED 状态的线索',
+        variant: 'default',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `即将把 ${pendingFriendLeads.length} 条 WECHAT_ADD_REQUESTED 线索标记为 RPA_BLOCKED，空闲对账将不再扫描它们。是否继续？`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setClearingPendingFriendLeads(true);
+    try {
+      const res = await requestLocalApi<{ cleared: number; to_status: string }>(
+        '/api/v1/friend-acceptance/dev/clear-pending',
+        { method: 'POST' },
+      );
+      toast({
+        title: '已清理待对账线索',
+        description: `共清理 ${res.cleared ?? 0} 条，状态已置为 ${res.to_status ?? 'RPA_BLOCKED'}`,
+        variant: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+    } catch (err: any) {
+      toast({
+        title: '清理待对账线索失败',
+        description: err?.message || '请确认后端已加载新的开发测试接口',
+        variant: 'destructive',
+      });
+    } finally {
+      setClearingPendingFriendLeads(false);
     }
   };
 
@@ -667,8 +709,18 @@ export function DevTesting() {
         </Card>
 
         <Card className="p-6 border border-border bg-card flex flex-col gap-3">
-          <div className="flex items-center justify-between pb-3 border-b border-border">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">🤝 好友通过模拟 / 对账</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              className="h-6 px-2 text-[10px] ml-auto"
+              disabled={clearingPendingFriendLeads || pendingFriendLeads.length === 0}
+              onClick={clearPendingFriendLeads}
+            >
+              {clearingPendingFriendLeads ? '清理中...' : '清理待对账'}
+            </Button>
             <Button
               size="sm"
               variant="outline"

@@ -147,6 +147,18 @@ class SQLiteStore:
             raise KeyError(lead_id)
         return dict(row)
 
+    def clear_leads_by_status(self, *, from_status: str, to_status: str, timestamp: str) -> int:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE leads
+                SET status = ?, updated_at = ?
+                WHERE status = ?
+                """,
+                (to_status, timestamp, from_status),
+            )
+            return int(cursor.rowcount or 0)
+
     def create_job(self, job: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(

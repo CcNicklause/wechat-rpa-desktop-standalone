@@ -195,11 +195,7 @@ class RpaOrchestrator:
                         )
                     self._run_add_request_with_timeout(lead['phone'], job['greeting'], update_step, job_id)
                     increment_daily_count(self.store, lead['sales_id'])
-                    lead_status = (
-                        LeadStatus.WECHAT_ACCEPTED
-                        if self._steps_indicate_direct_acceptance(steps)
-                        else LeadStatus.WECHAT_ADD_REQUESTED
-                    )
+                    lead_status = LeadStatus.WECHAT_ADD_REQUESTED
                     self.store.update_job(
                         job_id,
                         status='REAL_COMPLETED',
@@ -291,10 +287,6 @@ class RpaOrchestrator:
         if result['exc'] is not None:
             raise result['exc']
 
-    @staticmethod
-    def _steps_indicate_direct_acceptance(steps: list[str]) -> bool:
-        return any(step.startswith('ADD_DIRECTLY_CONFIRMED') for step in steps)
-
     def _record_wechat_success_outcome(self, lead: dict, lead_status: LeadStatus) -> None:
         if lead_status == LeadStatus.WECHAT_ACCEPTED:
             self.audit.record(
@@ -343,6 +335,9 @@ class RpaOrchestrator:
             updated_at=now_iso(),
         )
         self.store.update_lead(lead['lead_id'], status=lead_status.value, updated_at=now_iso())
+
+        if lead_status == LeadStatus.WECHAT_ALREADY_FRIEND:
+            self.store.enqueue_friend_check_report(lead['lead_id'], True, now_iso())
 
         # 风控终态触发当天熔断：把今日计数顶到上限，阻止后续任务
         if outcome.circuit_break:

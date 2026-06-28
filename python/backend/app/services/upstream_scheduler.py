@@ -25,6 +25,15 @@ TERMINAL_LEAD_STATUSES = frozenset({
     LeadStatus.WECHAT_ADD_REJECTED.value,
 })
 
+JOB_STATUS_UPSTREAM_STATUS = {
+    "REAL_COMPLETED": "REAL_SENT",
+    "SIMULATION_COMPLETED": "REAL_SENT",
+    "REAL_BIZ_ALREADY_FRIEND": "BIZ_ALREADY_FRIEND",
+    "REAL_BIZ_TARGET_NOT_FOUND": "BIZ_TARGET_NOT_FOUND",
+    "REAL_BIZ_RISK_CONTROL": "BIZ_RISK_CONTROL",
+    "REAL_BIZ_ADD_REJECTED": "BIZ_ADD_REJECTED",
+}
+
 
 def _get_weixin_pids() -> list:
     """检测 WeChat.exe / Weixin.exe 主进程 PID 列表"""
@@ -309,6 +318,17 @@ class UpstreamScheduler:
                 log_broadcaster.log(f"❌ 好友对账上报失败: {lead_id} -> {exc}")
         return {"reported": reported, "failed": failed, "results": results}
 
+    @staticmethod
+    def _upstream_result_for_job(job: dict) -> tuple[str, Optional[str]]:
+        status = job.get("status")
+        if status == "FAILED":
+            return "BIZ_FAILED", job.get("error_message") or "RPA 物理超时或取消"
+        if status in JOB_STATUS_UPSTREAM_STATUS:
+            return JOB_STATUS_UPSTREAM_STATUS[status], job.get("error_message")
+        if isinstance(status, str) and status.startswith("REAL_BIZ_"):
+            return job.get("error_code") or status.removeprefix("REAL_"), job.get("error_message")
+        return "REAL_SENT", None
+
     def _worker_loop(self):
         while not self._stop_event.is_set():
             item = self._task_queue.get()
@@ -348,17 +368,17 @@ class UpstreamScheduler:
                     )
                     if job and job["status"] not in running_states:
                         job_finished = True
-
-                        # 检查执行结果
-                        status = job["status"]
-                        if status == "FAILED":
-                            err_msg = job.get("error_message") or "RPA 物理超时或取消"
-                            log_broadcaster.log(f"❌ RPA 失败: {err_msg}")
-                            self.client.report_lead_status(lead_id, "BIZ_FAILED", f"{phone}={customer_name}", err_msg)
-                        else:
-                            # SIMULATION_COMPLETED / REAL_COMPLETED / REAL_BIZ_* 等均视为已发出
-                            log_broadcaster.log(f"✅ RPA 执行完毕: {status}")
-                            self.client.report_lead_status(lead_id, "REAL_SENT", f"{phone}={customer_name}", None)
+                        upstream_status, error_details = self._upstream_result_for_job(job)
+                        log_broadcaster.log(
+                            f"RPA 执行完毕: {job['status']} -> 上游状态 {upstream_status}"
+                        )
+                        self.client.report_lead_status(
+                            lead_id,
+                            upstream_status,
+                            f"{phone}={customer_name}",
+                            error_details,
+                        )
+                        break
             except Exception as e:
                 log_broadcaster.log(f"💥 RPA 任务队列执行抛出严重异常: {e}")
                 if self.client:

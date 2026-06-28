@@ -9,12 +9,12 @@ from backend.app.services.friend_acceptance import (
     FriendAcceptanceCheckResult,
     FriendAcceptanceRecheckWorker,
 )
-from backend.app.services.rpa_orchestrator import RpaOrchestrator
+from backend.app.services.rpa_orchestrator import RpaBusinessOutcome, RpaOrchestrator
 from backend.app.storage.sqlite_store import SQLiteStore
 
 
 class TestRpaAcceptanceLifecycle(unittest.TestCase):
-    def test_real_rpa_success_with_direct_confirm_marks_lead_accepted(self):
+    def test_real_rpa_success_with_direct_confirm_keeps_lead_pending_for_recheck(self):
         rpa, store, audit = self._make_orchestrator()
 
         def fake_add_request(_phone, _greeting, update_step, _job_id):
@@ -27,9 +27,10 @@ class TestRpaAcceptanceLifecycle(unittest.TestCase):
             rpa._run_job("job_1")
 
         lead_updates = [call.kwargs for call in store.update_lead.call_args_list]
-        self.assertIn({"status": LeadStatus.WECHAT_ACCEPTED.value, "updated_at": unittest.mock.ANY}, lead_updates)
+        self.assertIn({"status": LeadStatus.WECHAT_ADD_REQUESTED.value, "updated_at": unittest.mock.ANY}, lead_updates)
         event_names = [call.args[0] for call in audit.record.call_args_list]
-        self.assertIn("wechat.friend.accepted", event_names)
+        self.assertIn("wechat.friend.requested", event_names)
+        store.enqueue_friend_check_report.assert_not_called()
 
     def test_real_rpa_success_with_sent_request_keeps_lead_pending_and_records_request(self):
         rpa, store, audit = self._make_orchestrator()
@@ -78,6 +79,27 @@ class TestRpaAcceptanceLifecycle(unittest.TestCase):
         created_job = store.create_job.call_args.args[0]
         self.assertEqual(created_job["rpa_mode"], "real")
         self.assertFalse(created_job["human_approval"])
+
+    def test_already_friend_business_outcome_queues_friend_report(self):
+        rpa, store, _audit = self._make_orchestrator()
+        lead = store.get_lead.return_value
+        outcome = RpaBusinessOutcome(
+            code="BIZ_ALREADY_FRIEND",
+            message="对方已是好友，无需重复添加",
+        )
+
+        rpa._finalize_business_outcome("job_1", lead, [], outcome)
+
+        store.update_lead.assert_called_with(
+            lead["lead_id"],
+            status=LeadStatus.WECHAT_ALREADY_FRIEND.value,
+            updated_at=unittest.mock.ANY,
+        )
+        store.enqueue_friend_check_report.assert_called_once_with(
+            lead["lead_id"],
+            True,
+            unittest.mock.ANY,
+        )
 
     def test_recheck_worker_turns_pending_request_into_accepted_lead(self):
         temp_dir = tempfile.TemporaryDirectory()

@@ -119,3 +119,18 @@ async def simulate_accepted(
 
     service = FriendAcceptanceService(store, audit, checker=checker)
     return service.check_lead(lead_id)
+
+
+@router.post('/dev/clear-pending')
+async def clear_pending_friend_acceptance(store: SQLiteStore = Depends(get_store)):
+    cleared = store.clear_leads_by_status(
+        from_status=LeadStatus.WECHAT_ADD_REQUESTED.value,
+        to_status=LeadStatus.RPA_BLOCKED.value,
+        timestamp=now_iso(),
+    )
+    return {
+        'status': 'cleared',
+        'cleared': cleared,
+        'from_status': LeadStatus.WECHAT_ADD_REQUESTED.value,
+        'to_status': LeadStatus.RPA_BLOCKED.value,
+    }

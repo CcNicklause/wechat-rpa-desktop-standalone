@@ -98,6 +98,33 @@ def test_get_weixin_pids_detects_weixin_process_name():
         assert _get_weixin_pids() == [6900]
 
 
+def test_upstream_result_mapping_uses_job_business_status():
+    cases = [
+        ({"status": "REAL_COMPLETED"}, ("REAL_SENT", None)),
+        ({"status": "SIMULATION_COMPLETED"}, ("REAL_SENT", None)),
+        ({"status": "FAILED", "error_message": "timeout"}, ("BIZ_FAILED", "timeout")),
+        (
+            {"status": "REAL_BIZ_ALREADY_FRIEND", "error_message": "already"},
+            ("BIZ_ALREADY_FRIEND", "already"),
+        ),
+        (
+            {"status": "REAL_BIZ_TARGET_NOT_FOUND", "error_message": "missing"},
+            ("BIZ_TARGET_NOT_FOUND", "missing"),
+        ),
+        (
+            {"status": "REAL_BIZ_RISK_CONTROL", "error_message": "risk"},
+            ("BIZ_RISK_CONTROL", "risk"),
+        ),
+        (
+            {"status": "REAL_BIZ_ADD_REJECTED", "error_message": "rejected"},
+            ("BIZ_ADD_REJECTED", "rejected"),
+        ),
+    ]
+
+    for job, expected in cases:
+        assert UpstreamScheduler._upstream_result_for_job(job) == expected
+
+
 def make_scheduler_for_test(tmp_dir):
     settings = get_settings()
     db_path = Path(tmp_dir.name) / "test.db"
