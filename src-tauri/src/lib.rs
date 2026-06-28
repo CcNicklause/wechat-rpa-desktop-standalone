@@ -3,13 +3,23 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
+use tokio::sync::Mutex as AsyncMutex;
+
+mod terminal;
+
+use terminal::{MgrClient, TerminalManager};
 
 struct AppState {
     token: String,
     python_process: Mutex<Option<Child>>,
+    /// 当前活跃的 Portal session 副本，供 terminal 模块与 logout 路径读取。
+    /// 仅在登录成功 / session 恢复时写入；logout 清空。
+    portal_session: Arc<AsyncMutex<Option<PortalSession>>>,
+    /// 终端上报管理器单例，登录后构造，进程退出前 abort heartbeat。
+    terminal_manager: Arc<AsyncMutex<Option<Arc<TerminalManager>>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -380,7 +390,92 @@ async fn portal_get_session(app: AppHandle) -> PortalResult<Option<PortalSession
 
 #[tauri::command]
 fn portal_logout(app: AppHandle) -> PortalResult<()> {
-    clear_session(&app)
+    clear_session(&app)?;
+    // 异步：尽力上报 offline + abort heartbeat，整体 2s 超时不阻塞 UI。
+    let state = app.state::<AppState>();
+    let manager_slot = Arc::clone(&state.terminal_manager);
+    let session_slot = Arc::clone(&state.portal_session);
+    tauri::async_runtime::spawn(async move {
+        let (manager, token, tenant_id) = {
+            let mgr_guard = manager_slot.lock().await;
+            let sess_guard = session_slot.lock().await;
+            match (mgr_guard.as_ref(), sess_guard.as_ref()) {
+                (Some(m), Some(s)) => (Some(Arc::clone(m)), Some(s.access_token.clone()), Some(s.user.tenant_id)),
+                _ => (None, None, None),
+            }
+        };
+        if let (Some(manager), Some(token), Some(tenant_id)) = (manager, token, tenant_id) {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(2),
+                manager.shutdown(token, tenant_id, "logout"),
+            )
+            .await;
+        } else if let Some(manager) = manager_slot.lock().await.as_ref() {
+            // session 已被清空但 manager 还在：至少 abort heartbeat
+            manager.abort_heartbeat().await;
+        }
+        *manager_slot.lock().await = None;
+        *session_slot.lock().await = None;
+    });
+    Ok(())
+}
+
+/// 由前端在登录成功 / session 恢复成功后调用一次。
+/// 内部：写入 portal_session 副本 → 启动/重启 terminal manager 与 heartbeat。
+/// 失败不阻塞登录链路；错误仅打日志。
+#[tauri::command]
+async fn terminal_initialize(app: AppHandle, session: PortalSession) -> Result<(), String> {
+    eprintln!(
+        "[terminal] terminal_initialize 命令收到 tenant_id={} user={}",
+        session.user.tenant_id, session.user.phone
+    );
+    let state_arc = app.state::<AppState>();
+
+    // 后端兜底去重：同 token + 同 manager 已存在，仅刷新 heartbeat，跳过 record/status=online。
+    // 防御 React StrictMode 双触发、前端去重失效等情况，避免向 MGR 重复打 record。
+    let already_initialized_for_same_token = {
+        let sess_guard = state_arc.portal_session.lock().await;
+        let mgr_guard = state_arc.terminal_manager.lock().await;
+        sess_guard
+            .as_ref()
+            .map(|s| s.access_token == session.access_token)
+            .unwrap_or(false)
+            && mgr_guard.is_some()
+    };
+    if already_initialized_for_same_token {
+        eprintln!("[terminal] terminal_initialize 跳过 (同 token 已初始化)");
+        return Ok(());
+    }
+
+    {
+        let mut guard = state_arc.portal_session.lock().await;
+        *guard = Some(session.clone());
+    }
+
+    // 已存在 manager 则先 abort 旧 heartbeat（账号切换场景）
+    {
+        let guard = state_arc.terminal_manager.lock().await;
+        if let Some(existing) = guard.as_ref() {
+            existing.abort_heartbeat().await;
+        }
+    }
+
+    let identity = terminal::load_or_create_identity(&app);
+    let client = MgrClient::new(portal_api_base())?;
+    let manager = Arc::new(TerminalManager::new(identity, client));
+    {
+        let mut guard = state_arc.terminal_manager.lock().await;
+        *guard = Some(Arc::clone(&manager));
+    }
+
+    // 后台跑：不阻塞前端登录 await。
+    let token = session.access_token.clone();
+    let tenant_id = session.user.tenant_id;
+    tauri::async_runtime::spawn(async move {
+        manager.initialize(token, tenant_id).await;
+    });
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -396,6 +491,8 @@ pub fn run() {
         .manage(AppState {
             token: security_token,
             python_process: Mutex::new(None),
+            portal_session: Arc::new(AsyncMutex::new(None)),
+            terminal_manager: Arc::new(AsyncMutex::new(None)),
         })
         .setup(move |app| {
             // Set current directory to python backend
@@ -455,6 +552,32 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
+                // 终端上报：尽力上报 offline + abort heartbeat，1.5s 超时不阻塞退出。
+                let state = window.state::<AppState>();
+                let manager_slot = Arc::clone(&state.terminal_manager);
+                let session_slot = Arc::clone(&state.portal_session);
+                tauri::async_runtime::block_on(async move {
+                    let snapshot = {
+                        let mgr = manager_slot.lock().await;
+                        let sess = session_slot.lock().await;
+                        match (mgr.as_ref(), sess.as_ref()) {
+                            (Some(m), Some(s)) => Some((
+                                Arc::clone(m),
+                                s.access_token.clone(),
+                                s.user.tenant_id,
+                            )),
+                            _ => None,
+                        }
+                    };
+                    if let Some((manager, token, tenant_id)) = snapshot {
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs_f32(1.5),
+                            manager.shutdown(token, tenant_id, "app_exit"),
+                        )
+                        .await;
+                    }
+                });
+
                 let state = window.state::<AppState>();
                 let mut process = state.python_process.lock().unwrap();
                 if let Some(mut child) = process.take() {
@@ -470,6 +593,7 @@ pub fn run() {
             portal_send_sms_code,
             portal_get_session,
             portal_logout,
+            terminal_initialize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
