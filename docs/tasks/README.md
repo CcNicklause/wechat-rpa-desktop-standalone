@@ -28,6 +28,7 @@
 
 | 任务线 | 状态 | 说明 | 入口 |
 |---|---|---|---|
+| `project-closure-audit` | IN_PROGRESS | 全项目前端、后端/本地 API、RPA sidecar、状态流、审计日志、任务文档闭环审计；本轮不先改代码 | [state.md](project-closure-audit/state.md) |
 | `rpa-hardening` | DONE | RPA 加微链路 P0/P1 加固，103 个后端测试通过 | [state.md](rpa-hardening/state.md) |
 | `login-system` | IMPLEMENTED | P0 真实登录与 session 恢复已落地；终端心跳后续推进 | [state.md](login-system/state.md) |
 | `rpa-terminal-reporting` | DONE | MGR 终端 record/heartbeat/status 3 接口已接入，9/9 用例联调全过；StrictMode 双触发 bug 已修 | [state.md](rpa-terminal-reporting/state.md) |
