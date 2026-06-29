@@ -4,7 +4,11 @@ use std::fs::{self, OpenOptions};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex as AsyncMutex;
@@ -16,8 +20,10 @@ use terminal::{MgrClient, TerminalManager};
 
 struct AppState {
     token: String,
-    python_process: Mutex<Option<Child>>,
+    python_process: Arc<Mutex<Option<Child>>>,
     local_api_base: String,
+    sidecar_status: Arc<Mutex<SidecarRuntimeStatus>>,
+    shutdown_requested: Arc<AtomicBool>,
     /// 当前活跃的 Portal session 副本，供 terminal 模块与 logout 路径读取。
     /// 仅在登录成功 / session 恢复时写入；logout 清空。
     portal_session: Arc<AsyncMutex<Option<PortalSession>>>,
@@ -41,6 +47,98 @@ struct PortalSession {
     access_token: String,
     user: PortalUser,
     saved_at: u64,
+}
+
+const MAX_SIDECAR_RESTARTS: u32 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SidecarPhase {
+    Starting,
+    Running,
+    Restarting,
+    Failed,
+    Stopped,
+}
+
+impl SidecarPhase {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Restarting => "restarting",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SidecarRuntimeStatus {
+    phase: SidecarPhase,
+    restart_count: u32,
+    last_exit: Option<String>,
+    api_base: String,
+    log_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct SidecarStatusPayload {
+    phase: String,
+    restart_count: u32,
+    max_restarts: u32,
+    last_exit: Option<String>,
+    api_base: String,
+    log_dir: Option<String>,
+}
+
+impl SidecarRuntimeStatus {
+    fn new(api_base: String, log_dir: Option<PathBuf>) -> Self {
+        Self {
+            phase: SidecarPhase::Starting,
+            restart_count: 0,
+            last_exit: None,
+            api_base,
+            log_dir,
+        }
+    }
+
+    fn record_exit_and_should_restart(
+        &mut self,
+        observed_restart_count: u32,
+        max_restarts: u32,
+    ) -> bool {
+        if observed_restart_count >= max_restarts {
+            self.phase = SidecarPhase::Failed;
+            self.restart_count = observed_restart_count;
+            return false;
+        }
+
+        self.phase = SidecarPhase::Restarting;
+        self.restart_count = observed_restart_count + 1;
+        true
+    }
+
+    fn to_payload(&self) -> SidecarStatusPayload {
+        SidecarStatusPayload {
+            phase: self.phase.as_str().to_string(),
+            restart_count: self.restart_count,
+            max_restarts: MAX_SIDECAR_RESTARTS,
+            last_exit: self.last_exit.clone(),
+            api_base: self.api_base.clone(),
+            log_dir: self
+                .log_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SidecarConfig {
+    python_dir: PathBuf,
+    token: String,
+    port: u16,
+    log_dir: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +219,101 @@ fn uvicorn_args(port: u16) -> Vec<String> {
     .into_iter()
     .map(ToOwned::to_owned)
     .collect()
+}
+
+fn spawn_python_sidecar(config: &SidecarConfig) -> std::io::Result<Child> {
+    let mut cmd = Command::new("uv");
+    cmd.args(uvicorn_args(config.port));
+    cmd.current_dir(&config.python_dir);
+    cmd.env("LOCAL_SECURITY_TOKEN", &config.token);
+    cmd.env("PYTHONPATH", &config.python_dir);
+    fs::create_dir_all(&config.log_dir)?;
+
+    if let Ok(file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(config.log_dir.join("sidecar-stdout.log"))
+    {
+        cmd.stdout(Stdio::from(file));
+    } else {
+        cmd.stdout(Stdio::null());
+    }
+    if let Ok(file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(config.log_dir.join("sidecar-stderr.log"))
+    {
+        cmd.stderr(Stdio::from(file));
+    } else {
+        cmd.stderr(Stdio::null());
+    }
+
+    cmd.spawn()
+}
+
+fn start_sidecar_supervisor(
+    process_slot: Arc<Mutex<Option<Child>>>,
+    status_slot: Arc<Mutex<SidecarRuntimeStatus>>,
+    shutdown_requested: Arc<AtomicBool>,
+    config: SidecarConfig,
+) {
+    thread::spawn(move || loop {
+        if shutdown_requested.load(Ordering::SeqCst) {
+            break;
+        }
+        thread::sleep(Duration::from_secs(2));
+
+        let exit_reason = {
+            let mut process = process_slot.lock().unwrap();
+            match process.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        *process = None;
+                        Some(status.to_string())
+                    }
+                    Ok(None) => None,
+                    Err(err) => {
+                        *process = None;
+                        Some(format!("try_wait error: {err}"))
+                    }
+                },
+                None => None,
+            }
+        };
+
+        let Some(exit_reason) = exit_reason else {
+            continue;
+        };
+
+        let should_restart = {
+            let mut status = status_slot.lock().unwrap();
+            status.last_exit = Some(exit_reason);
+            let restart_count = status.restart_count;
+            status.record_exit_and_should_restart(restart_count, MAX_SIDECAR_RESTARTS)
+        };
+
+        if !should_restart {
+            continue;
+        }
+
+        thread::sleep(Duration::from_secs(1));
+        if shutdown_requested.load(Ordering::SeqCst) {
+            break;
+        }
+
+        match spawn_python_sidecar(&config) {
+            Ok(child) => {
+                *process_slot.lock().unwrap() = Some(child);
+                let mut status = status_slot.lock().unwrap();
+                status.phase = SidecarPhase::Running;
+            }
+            Err(err) => {
+                let mut status = status_slot.lock().unwrap();
+                status.phase = SidecarPhase::Failed;
+                status.last_exit = Some(format!("restart failed: {err}"));
+            }
+        }
+    });
 }
 
 fn session_path(app: &AppHandle) -> PortalResult<PathBuf> {
@@ -327,6 +520,11 @@ fn get_local_api_base(state: State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
+fn get_sidecar_status(state: State<'_, AppState>) -> SidecarStatusPayload {
+    state.sidecar_status.lock().unwrap().to_payload()
+}
+
+#[tauri::command]
 async fn portal_login_password(
     app: AppHandle,
     phone: String,
@@ -517,8 +715,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
             token: security_token,
-            python_process: Mutex::new(None),
+            python_process: Arc::new(Mutex::new(None)),
             local_api_base: api_base.clone(),
+            sidecar_status: Arc::new(Mutex::new(SidecarRuntimeStatus::new(
+                api_base.clone(),
+                None,
+            ))),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             portal_session: Arc::new(AsyncMutex::new(None)),
             terminal_manager: Arc::new(AsyncMutex::new(None)),
         })
@@ -556,45 +759,52 @@ pub fn run() {
             println!("[DIAGNOSTIC] final_dir resolved to = {:?}", final_dir);
             println!("[DIAGNOSTIC] local_api_base = {}", api_base);
 
-            // Spin up Python development server natively in the background
+            // Spin up Python development server natively in the background.
             drop(local_api_listener);
-            let mut cmd = Command::new("uv");
-            cmd.args(uvicorn_args(local_api_port));
-            cmd.current_dir(&final_dir);
-            cmd.env("LOCAL_SECURITY_TOKEN", &token_clone);
-            cmd.env("PYTHONPATH", &final_dir);
-            let log_dir = app.path().app_data_dir().unwrap_or_else(|_| final_dir.clone());
-            let _ = fs::create_dir_all(&log_dir);
-            if let Ok(file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_dir.join("sidecar-stdout.log"))
-            {
-                cmd.stdout(Stdio::from(file));
-            } else {
-                cmd.stdout(Stdio::null());
-            }
-            if let Ok(file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_dir.join("sidecar-stderr.log"))
-            {
-                cmd.stderr(Stdio::from(file));
-            } else {
-                cmd.stderr(Stdio::null());
-            }
-
-            let child = cmd.spawn().expect("failed to start Python sidecar backend");
-
+            let log_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| final_dir.clone());
+            let sidecar_config = SidecarConfig {
+                python_dir: final_dir,
+                token: token_clone.clone(),
+                port: local_api_port,
+                log_dir: log_dir.clone(),
+            };
             let state = app.state::<AppState>();
-            *state.python_process.lock().unwrap() = Some(child);
+            {
+                let mut status = state.sidecar_status.lock().unwrap();
+                status.log_dir = Some(log_dir);
+            }
+            match spawn_python_sidecar(&sidecar_config) {
+                Ok(child) => {
+                    *state.python_process.lock().unwrap() = Some(child);
+                    state.sidecar_status.lock().unwrap().phase = SidecarPhase::Running;
+                }
+                Err(err) => {
+                    let mut status = state.sidecar_status.lock().unwrap();
+                    status.phase = SidecarPhase::Failed;
+                    status.last_exit = Some(format!("initial start failed: {err}"));
+                    return Err(err.into());
+                }
+            }
+
+            start_sidecar_supervisor(
+                Arc::clone(&state.python_process),
+                Arc::clone(&state.sidecar_status),
+                Arc::clone(&state.shutdown_requested),
+                sidecar_config,
+            );
 
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                // 终端上报：尽力上报 offline + abort heartbeat，1.5s 超时不阻塞退出。
                 let state = window.state::<AppState>();
+                state.shutdown_requested.store(true, Ordering::SeqCst);
+                state.sidecar_status.lock().unwrap().phase = SidecarPhase::Stopped;
+
+                // 终端上报：尽力上报 offline + abort heartbeat，1.5s 超时不阻塞退出。
                 let manager_slot = Arc::clone(&state.terminal_manager);
                 let session_slot = Arc::clone(&state.portal_session);
                 tauri::async_runtime::block_on(async move {
@@ -617,7 +827,6 @@ pub fn run() {
                     }
                 });
 
-                let state = window.state::<AppState>();
                 let mut process = state.python_process.lock().unwrap();
                 if let Some(mut child) = process.take() {
                     let _ = child.kill();
@@ -628,6 +837,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_security_token,
             get_local_api_base,
+            get_sidecar_status,
             portal_login_password,
             portal_login_sms,
             portal_send_sms_code,
@@ -708,5 +918,39 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["--port", "18124"]));
         assert!(args.windows(2).any(|pair| pair == ["--host", "127.0.0.1"]));
         assert!(args.iter().any(|arg| arg == "backend.app.main:app"));
+    }
+
+    #[test]
+    fn sidecar_exit_restarts_until_limit() {
+        let mut status = SidecarRuntimeStatus::new(local_api_base(18125), None);
+
+        assert!(status.record_exit_and_should_restart(0, MAX_SIDECAR_RESTARTS));
+        assert_eq!(status.phase, SidecarPhase::Restarting);
+        assert_eq!(status.restart_count, 1);
+
+        assert!(status.record_exit_and_should_restart(1, MAX_SIDECAR_RESTARTS));
+        assert!(status.record_exit_and_should_restart(2, MAX_SIDECAR_RESTARTS));
+        assert!(!status.record_exit_and_should_restart(3, MAX_SIDECAR_RESTARTS));
+        assert_eq!(status.phase, SidecarPhase::Failed);
+        assert_eq!(status.restart_count, 3);
+    }
+
+    #[test]
+    fn sidecar_status_payload_exposes_runtime_state() {
+        let mut status = SidecarRuntimeStatus::new(
+            local_api_base(18126),
+            Some(PathBuf::from("C:/logs/sidecar")),
+        );
+        status.phase = SidecarPhase::Running;
+        status.restart_count = 2;
+        status.last_exit = Some("exit code: 1".to_string());
+
+        let payload = status.to_payload();
+
+        assert_eq!(payload.phase, "running");
+        assert_eq!(payload.restart_count, 2);
+        assert_eq!(payload.last_exit.as_deref(), Some("exit code: 1"));
+        assert_eq!(payload.api_base, "http://127.0.0.1:18126");
+        assert_eq!(payload.log_dir.as_deref(), Some("C:/logs/sidecar"));
     }
 }

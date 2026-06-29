@@ -3,6 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 let cachedToken: string | null = null;
 let cachedApiBase: string | null = null;
 
+export type SidecarStatus = {
+  phase: "starting" | "running" | "restarting" | "failed" | "stopped" | string;
+  restart_count: number;
+  max_restarts: number;
+  last_exit: string | null;
+  api_base: string;
+  log_dir: string | null;
+};
+
 async function getLocalToken(): Promise<string> {
   if (cachedToken) return cachedToken;
   if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
@@ -35,6 +44,17 @@ export async function getLocalApiBase(): Promise<string> {
   }
   cachedApiBase = "http://127.0.0.1:8000";
   return cachedApiBase;
+}
+
+export async function getSidecarStatus(): Promise<SidecarStatus | null> {
+  if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+    try {
+      return await invoke<SidecarStatus>("get_sidecar_status");
+    } catch (err) {
+      console.warn("Unable to read sidecar status", err);
+    }
+  }
+  return null;
 }
 
 export async function requestLocalApi<T = any>(
