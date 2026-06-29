@@ -1,5 +1,6 @@
 import { Users, UserCheck, RefreshCw, AlertCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { Lead } from '@/hooks/useLeads';
 import { countLeadsByStatus } from '@/lib/leadStatus';
 import type { LeadStats } from '@/hooks/useLeadsStats';
@@ -81,5 +82,3 @@ export function KpiStrip({ leads, stats, className }: KpiStripProps) {
     </div>
   );
 }
-
-import { cn } from '@/lib/utils';

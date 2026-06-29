@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Literal
 
@@ -61,10 +62,41 @@ class CallSummaryResponse(BaseModel):
 
 
 class LeadStatsResponse(BaseModel):
-    """Statistics for leads grouped by status categories."""
-    total: int = 0
-    success: int = 0  # WECHAT_ACCEPTED, WECHAT_ALREADY_FRIEND
-    running: int = 0  # CALLING, INTENT_CONFIRMED, RPA_PENDING_APPROVAL, RPA_EXECUTING, WECHAT_ADD_REQUESTED
-    failed: int = 0   # RPA_BLOCKED, RPA_FAILED, WECHAT_TARGET_NOT_FOUND, WECHAT_ADD_REJECTED, WECHAT_RISK_CONTROL, WECHAT_ACCEPTANCE_EXHAUSTED
-    neutral: int = 0  # NEW_LEAD, RPA_SIMULATED
-    status_counts: dict[str, int] = Field(default_factory=dict)  # Raw counts per individual status
+    total: int
+    by_status: dict[str, int]
+    success: int
+    running: int
+    failure: int
+    ts: str
+
+    @classmethod
+    def make(cls, by_status: dict[str, int]) -> "LeadStatsResponse":
+        # 确保所有 15 个 LeadStatus 都存在，缺失补 0
+        full_by_status: dict[str, int] = {status: by_status.get(status, 0) for status in LeadStatus}
+        total = sum(full_by_status.values())
+        success = full_by_status[LeadStatus.WECHAT_ACCEPTED]
+        running = sum(full_by_status[s] for s in [
+            LeadStatus.CALLING,
+            LeadStatus.INTENT_CONFIRMED,
+            LeadStatus.RPA_PENDING_APPROVAL,
+            LeadStatus.RPA_SIMULATED,
+            LeadStatus.RPA_EXECUTING,
+            LeadStatus.WECHAT_ADD_REQUESTED,
+        ])
+        failure = sum(full_by_status[s] for s in [
+            LeadStatus.RPA_FAILED,
+            LeadStatus.RPA_BLOCKED,
+            LeadStatus.WECHAT_RISK_CONTROL,
+            LeadStatus.WECHAT_ADD_REJECTED,
+            LeadStatus.WECHAT_TARGET_NOT_FOUND,
+            LeadStatus.WECHAT_ACCEPTANCE_EXHAUSTED,
+        ])
+        ts = datetime.now(timezone.utc).isoformat()
+        return cls(
+            total=total,
+            by_status=full_by_status,
+            success=success,
+            running=running,
+            failure=failure,
+            ts=ts,
+        )

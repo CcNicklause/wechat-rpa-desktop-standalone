@@ -1,12 +1,14 @@
 import { LeadsBoard } from './board/LeadsBoard';
 import { Lead } from '@/hooks/useLeads';
 import { AuditLog } from '@/hooks/useAudits';
+import type { LeadStats } from '@/hooks/useLeadsStats';
 
 interface LeadsDashboardProps {
   leads: Lead[];
+  stats?: LeadStats | null;
   audits: AuditLog[];
   activeJobId: string | null;
-  onTriggerJob: (leadId: number) => void;
+  onTriggerJob?: (leadId: string) => void;
   onJobComplete: () => void;
 }
 

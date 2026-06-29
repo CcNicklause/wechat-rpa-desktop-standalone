@@ -101,29 +101,8 @@ class LeadService:
         return [self._public_lead(lead) for lead in leads]
 
     def compute_lead_stats(self) -> LeadStatsResponse:
-        """Compute lead statistics grouped by status categories."""
-        status_counts = self.store.count_leads_by_status()
-
-        # Define status groupings (matching frontend LEAD_STATUS_GROUPS)
-        success_statuses = {'WECHAT_ACCEPTED', 'WECHAT_ALREADY_FRIEND'}
-        running_statuses = {'CALLING', 'INTENT_CONFIRMED', 'RPA_PENDING_APPROVAL', 'RPA_EXECUTING', 'WECHAT_ADD_REQUESTED'}
-        failed_statuses = {'RPA_BLOCKED', 'RPA_FAILED', 'WECHAT_TARGET_NOT_FOUND', 'WECHAT_ADD_REJECTED', 'WECHAT_RISK_CONTROL', 'WECHAT_ACCEPTANCE_EXHAUSTED'}
-        neutral_statuses = {'NEW_LEAD', 'RPA_SIMULATED'}
-
-        total = sum(status_counts.values())
-        success = sum(status_counts.get(s, 0) for s in success_statuses)
-        running = sum(status_counts.get(s, 0) for s in running_statuses)
-        failed = sum(status_counts.get(s, 0) for s in failed_statuses)
-        neutral = sum(status_counts.get(s, 0) for s in neutral_statuses)
-
-        return LeadStatsResponse(
-            total=total,
-            success=success,
-            running=running,
-            failed=failed,
-            neutral=neutral,
-            status_counts=status_counts
-        )
+        by_status = self.store.count_leads_by_status()
+        return LeadStatsResponse.make(by_status)
 
     def get_lead(self, lead_id: str) -> dict:
         return self._require_lead(lead_id)

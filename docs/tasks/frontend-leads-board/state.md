@@ -54,21 +54,24 @@
 | # | 节点 | 状态 | 产物 | 备注 |
 |---|-----|------|-----|-----|
 | C2-0 | Cycle 2 启动登记 | DONE | state.md（追加本章节） | 首次涉及后端改动 |
-| C2-1 | plan-agent: Cycle 2 设计 | IN_PROGRESS | plan.md 追加 Cycle 2 章节 | 需求 + 技术设计 + 测试清单已完成 |
-| C2-2 | coder-agent: Cycle 2 实施 | TODO | 代码 + flow2.md | 后端 stats + 前端口径修正 + DevTesting 联通 |
+| C2-1 | plan-agent: Cycle 2 设计 | DONE | plan.md 追加 Cycle 2 章节 | 需求 + 技术设计 + 测试清单已完成 |
+| C2-2 | coder-agent: Cycle 2 实施 | DONE | 代码 + flow.md（追加） | 后端 stats + 前端口径修正 + DevTesting 联通 |
 | C2-3 | plan-agent: Cycle 2 对账 | TODO | plan.md 追加对账清单 | 对齐事实与期望 |
-| C2-4 | test-agent: Cycle 2 测试 | TODO | test2.md 或追加 | 覆盖新增功能 + 回归 |
+| C2-4 | test-agent: Cycle 2 测试 | DONE | 后端单测 + 回归 | 新增 5 个单测，108 个回归全通过 |
 
 ### Cycle 2 范围
 
 - ✅ **件 1**：前端 KPI 口径修正（抽离 `src/lib/leadStatus.ts`）
 - ✅ **件 2**：DevTesting 联通看板（移除"立即执行"按钮 + `registerJobStarted` + toast 跳转）
 - ✅ **件 3**：后端 KPI Stats 接口（`GET /api/v1/leads/stats` + 前端接入）
+- ✅ **新增**：后端单测 `python/backend/app/tests/test_lead_stats.py`（覆盖空库/单状态/多状态/全状态）
 - ✅ **不动**：`useDevTestStore`、重跑按钮完整流程、今日新增等 audit_events 基 KPI
 
 ### Cycle 2 当前等待
 
 - plan.md Cycle 2 章节已追加完成
-- 下一步：coder-agent 按 plan 执行
+- coder-agent 已完成 Cycle 2 实施
+- 后端单测 + 回归已完成（108/108 全通过）
+- 下一步：plan-agent 对账
 
-STATUS: CYCLE2_READY
+STATUS: CYCLE2_DONE

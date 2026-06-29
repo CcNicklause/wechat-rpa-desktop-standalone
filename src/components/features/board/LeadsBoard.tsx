@@ -13,6 +13,7 @@ type TabType = 'jobs' | 'steps' | 'timeline' | 'raw';
 
 interface LeadsBoardProps {
   leads: Lead[];
+  stats?: any;
   audits: AuditLog[];
   activeJobId: string | null;
   onTriggerJob?: (leadId: string) => void;
@@ -21,13 +22,15 @@ interface LeadsBoardProps {
 
 export function LeadsBoard({
   leads,
+  stats: propsStats,
   audits,
   activeJobId,
   onTriggerJob,
   onJobComplete,
 }: LeadsBoardProps) {
   const { query, setQuery } = useHashRoute('/dashboard');
-  const { data: stats } = useLeadsStatsQuery();
+  const { data: internalStats } = useLeadsStatsQuery();
+  const stats = propsStats ?? internalStats;
 
   // 从 URL 读取状态
   const selectedLeadId = query.lead || null;

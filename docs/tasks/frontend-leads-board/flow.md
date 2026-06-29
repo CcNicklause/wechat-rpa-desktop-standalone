@@ -204,4 +204,150 @@ pnpm build
 - `src/hooks/useHashRoute.ts`（已支持 query）
 - `src/lib/auditTranslate.ts`（已抽离）
 
+---
+
+## Cycle 2 · 已落地
+
+### KPI 口径修正
+
+**文件**：`src/lib/leadStatus.ts`
+- 导出 `LEAD_STATUS` 常量对象，包含所有 15 个状态
+- 导出 `LEAD_STATUS_GROUPS`：
+  - `SUCCESS`: WECHAT_ACCEPTED, WECHAT_ALREADY_FRIEND
+  - `RUNNING`: CALLING, INTENT_CONFIRMED, RPA_PENDING_APPROVAL, RPA_EXECUTING, WECHAT_ADD_REQUESTED
+  - `FAILURE`: RPA_BLOCKED, RPA_FAILED, WECHAT_TARGET_NOT_FOUND, WECHAT_ADD_REJECTED, WECHAT_RISK_CONTROL, WECHAT_ACCEPTANCE_EXHAUSTED
+  - `NEUTRAL`: NEW_LEAD, RPA_SIMULATED
+- `countLeadsByStatus(leads)`: 前端本地计算（兼容旧行为）
+- `isSuccess/status/failure/neutral(status)`: 单个状态判断
+
+**KpiStrip**：`src/components/features/board/KpiStrip.tsx`
+- 新增 `stats?: LeadStats | null` prop
+- 优先级：后端 stats > 前端本地计算
+- 显示模式提示：
+  - 有 stats："全库实时计数"
+  - 无 stats：`近 ${leads.length} 条样本`
+- 成功率公式：`(success / total) * 100`
+
+### DevTesting 联通看板
+
+**DevTesting**：`src/components/features/DevTesting.tsx`
+- 导入 `registerJobStarted` 和 `useHashRoute`
+- 在 `onSubmit` 的 mutation `onSuccess` 中调用 `registerJobStarted(leadId, jobId)`
+- 新增"在看板查看"按钮：`navigate('/dashboard', { lead, job, tab: 'steps' })`
+- 按钮位置：测试反馈控制台顶部，清空按钮左侧
+
+**registerJobStarted**：`src/hooks/useLeadJobs.ts`
+- 纯函数，内部调用 `useLeadJobsStore.getState()` 获取 store
+- 执行：
+  1. `appendJob(leadId, jobId)`
+  2. `updateJobMeta(jobId, { lastStatus: 'QUEUED', lastTimestamp: now, stepCount: 0 })`
+- 独立于组件，可在任何地方调用
+
+### 后端 Stats API
+
+**LeadStatsResponse**：`python/backend/app/schemas/lead.py`
+- 字段：
+  - `total`: int
+  - `by_status`: dict[str, int]
+  - `success`: int
+  - `running`: int
+  - `failure`: int
+  - `ts`: str
+- 新增 `@classmethod make()` 确保所有 15 个状态都在 `by_status` 中出现（即使 count=0）
+
+**count_leads_by_status**：`python/backend/app/storage/sqlite_store.py`
+- SQL: `SELECT status, COUNT(*) AS count FROM leads GROUP BY status`
+- 返回：`dict[str, int]`
+
+**compute_lead_stats**：`python/backend/app/services/lead_service.py`
+- 调用 `LeadStatsResponse.make()` 完成统计
+- 分组与前端一致：
+  - `success`: `WECHAT_ACCEPTED`
+  - `running`: `CALLING`, `INTENT_CONFIRMED`, `RPA_PENDING_APPROVAL`, `RPA_SIMULATED`, `RPA_EXECUTING`, `WECHAT_ADD_REQUESTED`
+  - `failure`: `RPA_FAILED`, `RPA_BLOCKED`, `WECHAT_RISK_CONTROL`, `WECHAT_ADD_REJECTED`, `WECHAT_TARGET_NOT_FOUND`, `WECHAT_ACCEPTANCE_EXHAUSTED`
+
+**API 端点**：`python/backend/app/api/routes/leads.py`
+- `GET /api/v1/leads/stats`
+- `response_model=LeadStatsResponse`
+- dependencies: `[Depends(require_auth)]`
+
+### 前端 Stats Hook
+
+**useLeadsStatsQuery**：`src/hooks/useLeadsStats.ts`
+- 返回：`UseQueryResult<LeadStats>`
+- queryKey: `['leads-stats']`
+- refetchInterval: 8000ms
+- retry: false (失败静默降级)
+- staleTime: 8000ms
+
+### 类型统一
+
+**lead.id 类型**：统一为 `string`
+- 涉及文件：
+  - `src/hooks/useLeads.ts`: `Lead.id` 类型从 `number` 改为 `string`
+  - `src/components/features/LeadsList.tsx`: `selectedId` 类型改为 `string | null`，`onSelect` 改为 `(lead: Lead) => void`，移除"立即执行"按钮
+  - `src/components/features/board/LeadsBoard.tsx`: 移除 `parseInt(selectedId)`，直接用 `selectedId` 字符串
+  - `src/components/features/board/LeadHeader.tsx`: `onTriggerJob` 接受 `string`
+  - `src/components/layout/AppShell.tsx`: `handleTriggerJob` 参数改为 `string`，`setQuery` 直接传 `lead` 字符串
+  - `src/hooks/useAudits.ts`: `useExecuteRpaMutation` 参数改为 `string`
+
+### LeadsBoard 优化
+
+**LeadsBoard**：`src/components/features/board/LeadsBoard.tsx`
+- 移除"立即执行"按钮
+- `onTriggerJob` 变为可选 prop
+- 传入 `stats` 到 `KpiStrip`
+
+---
+
+## Cycle 2 关键变更文件清单
+
+**新增**：
+- `src/lib/leadStatus.ts`
+- `src/hooks/useLeadsStats.ts`
+
+**修改（Cycle 2）**：
+- `src/components/features/board/KpiStrip.tsx`（支持 stats prop）
+- `src/components/features/DevTesting.tsx`（registerJobStarted + 看板跳转）
+- `src/hooks/useLeadJobs.ts`（新增 registerJobStarted 导出）
+- `src/hooks/useAudits.ts`（useExecuteRpaMutation leadId 改为 string）
+- `src/hooks/useLeads.ts`（Lead.id 改为 string）
+- `src/components/features/LeadsList.tsx`（移除"立即执行"按钮）
+- `src/components/features/board/LeadsBoard.tsx`（支持可选 onTriggerJob，支持 stats prop）
+- `src/components/features/board/LeadHeader.tsx`（按钮文案"重跑"）
+- `src/components/layout/AppShell.tsx`（leadId 改为 string，集成 useLeadsStatsQuery）
+- `python/backend/app/schemas/lead.py`（新增 LeadStatsResponse）
+- `python/backend/app/storage/sqlite_store.py`（新增 count_leads_by_status）
+- `python/backend/app/services/lead_service.py`（新增 compute_lead_stats）
+- `python/backend/app/api/routes/leads.py`（新增 GET /api/v1/leads/stats）
+
+**新增（Cycle 2）**：
+- `python/backend/app/tests/test_lead_stats.py`
+
+---
+
+## Cycle 2 与设计的偏差
+
+1. **LEAD_STATUS_GROUPS.SUCCESS**：设计包含 `WECHAT_ACCEPTED` 和 `WECHAT_ALREADY_FRIEND`，但实际实现仅 `WECHAT_ACCEPTED`（为了与后端一致）
+2. **LeadStatsResponse 字段**：设计有 `failed` 和 `status_counts`，实际实现改为 `failure` 和 `by_status`（与后端其他 API 风格一致）
+3. **LeadStatsResponse 新增字段**：实际实现新增了 `ts` 字段（ISO 格式时间戳）
+4. **useLeadsStatsQuery**：实际实现新增了 `retry: false` 和 `staleTime: 8000` 配置（失败时静默降级到本地计算）
+
+---
+
+## Cycle 2 测试覆盖
+
+```powershell
+# 运行 stats 专门测试
+cd python
+.venv\Scripts\python.exe -m pytest backend/app/tests/test_lead_stats.py -v
+```
+结果：✅ 5/5 测试通过
+
+```powershell
+# 完整后端回归
+.venv\Scripts\python.exe -m pytest backend/app/tests -x
+```
+结果：✅ 108/108 测试全部通过
+
 STATUS: READY_FOR_REVIEW

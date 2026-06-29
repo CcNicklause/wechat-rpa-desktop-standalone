@@ -10,6 +10,7 @@ const UpstreamConfig = lazy(() => import('../features/UpstreamConfig').then(m =>
 
 
 import { useLeadsQuery } from '@/hooks/useLeads';
+import { useLeadsStatsQuery } from '@/hooks/useLeadsStats';
 import { useAuditLogsQuery, useExecuteRpaMutation } from '@/hooks/useAudits';
 import { useToast } from '@/hooks/useToast';
 import { useHashRoute } from '@/hooks/useHashRoute';
@@ -23,6 +24,7 @@ export function AppShell() {
 
 
   const { data: leads = [], refetch: refetchLeads } = useLeadsQuery(true);
+  const { data: stats } = useLeadsStatsQuery();
   const { data: audits = [], refetch: refetchAudits } = useAuditLogsQuery();
   const executeRpa = useExecuteRpaMutation();
   const { toast } = useToast();
@@ -78,6 +80,7 @@ export function AppShell() {
               return (
                 <LeadsDashboard
                   leads={leads}
+                  stats={stats}
                   audits={audits}
                   activeJobId={activeJobId}
                   onTriggerJob={handleTriggerJob}
