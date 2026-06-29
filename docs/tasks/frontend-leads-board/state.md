@@ -80,6 +80,73 @@ STATUS: CONVERGED
 
 ---
 
+## Cycle 8 · 节点状态（小窗口抽屉布局修复）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C8-0 | 问题定位 | DONE | 截图 + 代码检查 | 小窗口下抽屉宽度、过程页固定高度、日志裁切、状态行挤压 |
+| C8-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 锁定响应式宽度、去固定高度、可换行布局 |
+| C8-2 | 前端实施 | DONE | Drawer / Process / Steps / Header / Overview | 修复窄窗口错位与裁切 |
+| C8-3 | 验证 | DONE | 测试命令结果 | 布局测试与 `pnpm build` 通过 |
+
+### Cycle 8 范围
+
+- ✅ 详情抽屉保持接近旧尺寸的 `60vw / max 900px`，同时不再受默认 `sm:max-w-sm` 限制。
+- ✅ `过程` Tab 移除固定 `h-[calc(100vh-280px)]`。
+- ✅ 关键日志不再 `overflow-hidden` 裁切时间线圆点和状态 Badge。
+- ✅ 步骤头部、底部状态、步骤 tag、错误码允许换行，避免窄宽互相挤压。
+- ✅ 概览信息块小窗口下一列展示，抽屉头部允许换行。
+- ✅ 线索选中态移除整圈 `ring`，避免右侧边框在遮罩下显得过粗。
+- ✅ 抽屉头部右侧预留关闭按钮空间，避免关闭按钮与“重跑”交错。
+
+### Cycle 8 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm -s build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED
+
+---
+
+## Cycle 7 · 节点状态（概览展示验证语）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C7-0 | 需求确认 | DONE | 对话确认 | 概览中轻量展示验证语 |
+| C7-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 断言验证语取值与空值文案 |
+| C7-2 | 前端实施 | DONE | `LeadOverviewPanel`、`leadOverviewCopy.ts` | 概览新增“验证语”信息块 |
+| C7-3 | 验证 | DONE | 测试命令结果 | 文案测试与 `pnpm build` 通过 |
+
+### Cycle 7 范围
+
+- ✅ 详情抽屉 `概览` 增加“验证语”信息块。
+- ✅ 验证语取值优先级：`greeting` → `verification_message` → `verify_message` → `add_reason`。
+- ✅ 验证语为空时显示 `未设置`。
+- ✅ 不新增 Tab，不改后端协议。
+
+### Cycle 7 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 4/4 测试通过
+
+```powershell
+pnpm -s build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED
+
+---
+
 ## Cycle 6 · 节点状态（详情抽屉用户视角收敛）
 
 | # | 节点 | 状态 | 产物 | 备注 |

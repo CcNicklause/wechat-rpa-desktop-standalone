@@ -12,6 +12,9 @@ export interface Lead extends LeadDisplaySource {
   customer_name?: string;
   phone_masked?: string;
   add_reason?: string;
+  greeting?: string;
+  verification_message?: string;
+  verify_message?: string;
   source?: string;
 }
 

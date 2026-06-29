@@ -16,14 +16,14 @@ export function LeadHeader({ lead, onTriggerJob, className }: LeadHeaderProps) {
   const display = getLeadDisplay(lead);
 
   return (
-    <div className={cn('flex items-center justify-between', className)}>
+    <div className={cn('flex flex-wrap items-start justify-between gap-3', className)}>
       <div className="space-y-1 min-w-0">
         <h2 className="text-lg font-semibold text-foreground font-mono truncate">{display.account}</h2>
         {display.remark && (
           <p className="text-xs text-muted-foreground truncate">备注：{display.remark}</p>
         )}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <StatusBadge status={lead.status} showDot />
         {onTriggerJob && (
           <Button

@@ -22,10 +22,10 @@ export function LeadStepsPanel({ jobId, className }: LeadStepsPanelProps) {
   }
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground font-mono">
+    <div className={cn('flex min-h-0 flex-col', className)}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[10px] text-muted-foreground font-mono">
             {jobId.slice(0, 12)}...
           </span>
           {!isTerminal && (
@@ -41,11 +41,11 @@ export function LeadStepsPanel({ jobId, className }: LeadStepsPanelProps) {
       <JobStepsView snapshot={snapshot} error={error} className="flex-1" />
 
       {snapshot && (
-        <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
           <span>
             共 {snapshot.steps.length} 步 · {snapshot.rpa_mode === 'real' ? '真实模式' : '模拟模式'}
           </span>
-          <span className="font-semibold text-foreground">{snapshot.status}</span>
+          <span className="break-all font-semibold text-foreground">{snapshot.status}</span>
         </div>
       )}
     </div>

@@ -450,6 +450,84 @@ pnpm build
 
 ---
 
+## Cycle 7 · 概览展示验证语
+
+### 实际落地
+
+**文案工具**：`src/lib/leadOverviewCopy.ts`
+- 新增 `leadVerificationText(lead)`。
+- 取值优先级：`greeting` → `verification_message` → `verify_message` → `add_reason`。
+- 全部为空或空白时返回 `未设置`。
+
+**概览组件**：`src/components/features/board/LeadOverviewPanel.tsx`
+- 在概览信息块中新增 `验证语`。
+- 与目标账号、当前状态、备注、最近执行并列展示，不新增 Tab。
+
+**类型兼容**：`src/hooks/useLeads.ts`
+- `Lead` 类型补充 `greeting`、`verification_message`、`verify_message` 兼容字段。
+
+### Cycle 7 测试覆盖
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 4/4 测试通过
+
+```powershell
+pnpm -s build
+```
+结果：✅ TypeScript + Vite 构建通过
+
+---
+
+## Cycle 8 · 小窗口抽屉布局修复
+
+### 根因
+
+- `SheetContent` 默认样式包含 `w-3/4 sm:max-w-sm`，详情抽屉叠加 `sm:w-[60vw] sm:max-w-[900px]` 后，在中小窗口下宽度策略不够稳定。
+- `过程` Tab 使用固定 `h-[calc(100vh-280px)]`，内容区被压缩后产生多层滚动。
+- `LeadProcessPanel` 的关键日志区域使用 `overflow-hidden`，小窗口下会裁切时间线圆点、状态 Badge 和日志内容。
+- 步骤头部、底部状态、长 step tag / error code 使用单行布局，窄宽时互相挤压。
+
+### 实际落地
+
+**LeadDetailDrawer**
+- 抽屉宽度保持接近旧尺寸：`w-full sm:w-[60vw] sm:max-w-none lg:max-w-[900px]`，既避免默认 `sm:max-w-sm` 限制，也不在中小窗口占用过宽。
+- 内容区使用 `flex-1 min-h-0 overflow-y-auto`。
+- 移除 `过程` Tab 的固定高度。
+- Footer 改为可换行布局，错误码允许 `break-all`。
+- Header 增加右侧内边距，给 Sheet 自带关闭按钮预留空间，避免与“重跑”按钮交错。
+
+**LeadsList**
+- 选中态移除 `ring-1 ring-primary`，保留左侧指示条、浅色背景和轻描边。
+- 避免在抽屉遮罩下右侧边框显得过粗。
+
+**LeadProcessPanel**
+- 移除固定高度和 `overflow-hidden`。
+- 使用普通纵向流式布局，交给抽屉内容区统一滚动。
+
+**LeadStepsPanel / JobStepsView / AuditList**
+- 头部、底部、审计行支持换行。
+- 长状态、长 tag、长错误信息使用 `break-all`，避免把布局撑歪。
+
+**LeadOverviewPanel / LeadHeader**
+- 概览信息块在小窗口下一列展示。
+- 抽屉头部允许换行，避免账号、状态、重跑按钮互相挤压。
+
+### Cycle 8 测试覆盖
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm -s build
+```
+结果：✅ TypeScript + Vite 构建通过
+
+---
+
 ## Cycle 5 · 详情 Tab 中文化与数据映射说明
 
 ### Tab 文案

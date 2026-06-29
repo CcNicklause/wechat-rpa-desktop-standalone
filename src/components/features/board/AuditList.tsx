@@ -10,7 +10,7 @@ interface AuditListProps {
 
 export function AuditList({ audits, className }: AuditListProps) {
   return (
-    <div className={cn('flex-1 overflow-y-auto space-y-4 pr-2 text-xs custom-scrollbar', className)}>
+    <div className={cn('space-y-4 pr-1 sm:pr-2 text-xs custom-scrollbar', className)}>
       {audits.map((audit) => {
         const { displayTitle, displayMessage, displayResult } = translateAuditLog(audit);
         return (
@@ -19,7 +19,7 @@ export function AuditList({ audits, className }: AuditListProps) {
             <div className="absolute -left-1.5 top-0.5 w-3 h-3 rounded-full bg-background border-2 border-primary flex items-center justify-center" />
 
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
                 <span className="font-mono text-primary">
                   {audit.timestamp ? audit.timestamp.slice(11, 19) : '00:00:00'}
                 </span>

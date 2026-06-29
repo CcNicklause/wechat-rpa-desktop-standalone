@@ -24,7 +24,7 @@ export function JobStepsView({ snapshot, error, className }: JobStepsViewProps) 
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto border border-border rounded-lg bg-muted/20 p-2 space-y-1 text-[10.5px] leading-relaxed font-mono">
+      <div className="min-h-[140px] overflow-y-auto border border-border rounded-lg bg-muted/20 p-2 space-y-1 text-[10.5px] leading-relaxed font-mono">
         {steps.length === 0 ? (
           <p className="text-muted-foreground text-center py-4">等待第一条 step…</p>
         ) : (
@@ -44,15 +44,15 @@ function StepLine({ index, step }: { index: number; step: string }) {
   const palette = STEP_TONE_PALETTE[tone];
 
   return (
-    <div className={`flex gap-2 items-start ${palette.row}`}>
+    <div className={`flex min-w-0 flex-wrap gap-1.5 items-start ${palette.row}`}>
       <span className="text-muted-foreground select-none w-5 text-right shrink-0">{index + 1}.</span>
       {tag ? (
         <>
-          <span className={`px-1.5 py-px rounded text-[9.5px] font-bold shrink-0 ${palette.tag}`}>{tag}</span>
-          <span className="break-all">{text}</span>
+          <span className={`max-w-full break-all px-1.5 py-px rounded text-[9.5px] font-bold ${palette.tag}`}>{tag}</span>
+          <span className="min-w-0 flex-1 basis-40 break-all">{text}</span>
         </>
       ) : (
-        <span className="break-all">{text}</span>
+        <span className="min-w-0 flex-1 basis-40 break-all">{text}</span>
       )}
     </div>
   );

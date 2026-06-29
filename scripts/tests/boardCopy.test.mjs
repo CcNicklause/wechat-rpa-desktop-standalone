@@ -48,3 +48,40 @@ test('uses Chinese labels for lead detail tabs', async () => {
   assert.equal(normalizeLeadDetailTab('jobs'), 'history');
   assert.equal(normalizeLeadDetailTab('unknown'), 'overview');
 });
+
+test('formats lead overview verification message', async () => {
+  const { leadVerificationText } = await loadTsModule('../../src/lib/leadOverviewCopy.ts');
+
+  assert.equal(
+    leadVerificationText({ greeting: '你好，请通过一下。' }),
+    '你好，请通过一下。',
+  );
+  assert.equal(leadVerificationText({ verification_message: '我是企微顾问。' }), '我是企微顾问。');
+  assert.equal(leadVerificationText({ greeting: '   ' }), '未设置');
+});
+
+test('lead detail drawer layout is resilient in narrow windows', () => {
+  const drawer = readFileSync(new URL('../../src/components/features/board/LeadDetailDrawer.tsx', import.meta.url), 'utf8');
+  const processPanel = readFileSync(new URL('../../src/components/features/board/LeadProcessPanel.tsx', import.meta.url), 'utf8');
+  const stepsPanel = readFileSync(new URL('../../src/components/features/board/LeadStepsPanel.tsx', import.meta.url), 'utf8');
+
+  assert.match(drawer, /sm:w-\[60vw\]/);
+  assert.match(drawer, /lg:max-w-\[900px\]/);
+  assert.match(drawer, /sm:max-w-none/);
+  assert.doesNotMatch(drawer, /min\(820px/);
+  assert.match(drawer, /pr-14/);
+  assert.doesNotMatch(drawer, /h-\[calc\(100vh-280px\)\]/);
+  assert.match(drawer, /min-h-0 overflow-y-auto/);
+  assert.match(drawer, /flex-wrap/);
+  assert.doesNotMatch(processPanel, /overflow-hidden/);
+  assert.match(processPanel, /space-y-5/);
+  assert.match(stepsPanel, /flex-wrap/);
+});
+
+test('selected lead row uses subtle highlight without a full outline ring', () => {
+  const leadsList = readFileSync(new URL('../../src/components/features/LeadsList.tsx', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(leadsList, /ring-1 ring-primary/);
+  assert.match(leadsList, /border-primary\/40/);
+  assert.match(leadsList, /bg-primary\/5/);
+});

@@ -3,6 +3,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { Lead } from '@/hooks/useLeads';
 import type { JobMeta } from '@/hooks/useLeadJobs';
 import { getLeadDisplay } from '@/lib/leadDisplay';
+import { leadVerificationText } from '@/lib/leadOverviewCopy';
 import { statusDisplayLabel } from '@/lib/statusDisplay';
 import { cn } from '@/lib/utils';
 
@@ -25,10 +26,11 @@ export function LeadOverviewPanel({ lead, latestJob, className }: LeadOverviewPa
 
   return (
     <div className={cn('space-y-5 text-sm', className)}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <InfoBlock label="目标账号" value={display.account} mono />
         <InfoBlock label="当前状态" value={<StatusBadge status={lead.status} showDot />} />
         <InfoBlock label="备注" value={display.remark || '暂无备注'} />
+        <InfoBlock label="验证语" value={leadVerificationText(lead)} />
         <InfoBlock
           label="最近执行"
           value={latestJob ? statusDisplayLabel(latestJob.lastStatus) : '暂无执行记录'}

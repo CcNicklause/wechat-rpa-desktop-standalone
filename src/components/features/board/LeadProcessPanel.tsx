@@ -13,17 +13,17 @@ interface LeadProcessPanelProps {
 
 export function LeadProcessPanel({ lead, audits, jobId, className }: LeadProcessPanelProps) {
   return (
-    <div className={cn('flex flex-col gap-4 h-full min-h-0', className)}>
-      <section className="min-h-[160px] max-h-[240px] overflow-hidden">
+    <div className={cn('space-y-5 pb-2', className)}>
+      <section className="min-w-0">
         <SectionTitle title="关键日志" />
-        <div className="h-[calc(100%-24px)] overflow-hidden">
+        <div className="min-w-0">
           <LeadTimelinePanel lead={lead} audits={audits} />
         </div>
       </section>
 
-      <section className="flex-1 min-h-0">
+      <section className="min-w-0">
         <SectionTitle title="执行步骤" />
-        <LeadStepsPanel jobId={jobId} className="h-[calc(100%-24px)]" />
+        <LeadStepsPanel jobId={jobId} />
       </section>
     </div>
   );

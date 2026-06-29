@@ -38,7 +38,7 @@ export function LeadsList({ leads, totalCount, selectedId, onSelect }: LeadsList
               className={cn(
                 'p-3.5 bg-card border rounded-xl flex items-center justify-between transition-colors shadow-sm cursor-pointer relative',
                 selectedId === lead.id
-                  ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                  ? 'border-primary/40 bg-primary/5 shadow-none'
                   : 'border-border hover:bg-muted/50'
               )}
               onClick={() => onSelect(lead)}
