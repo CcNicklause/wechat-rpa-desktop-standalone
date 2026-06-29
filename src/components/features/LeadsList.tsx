@@ -1,16 +1,18 @@
 import { Card, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { EmptyState } from '@/components/common/EmptyState';
+import { LeadRowSummary } from './board/LeadRowSummary';
 import { Lead } from '@/hooks/useLeads';
 
 interface LeadsListProps {
   leads: Lead[];
-  onTriggerJob: (leadId: number) => void;
+  selectedId: string | null;
+  onSelect: (lead: Lead) => void;
+  onTriggerJob?: (leadId: string) => void;
 }
 
-export function LeadsList({ leads, onTriggerJob }: LeadsListProps) {
+export function LeadsList({ leads, selectedId, onSelect, onTriggerJob }: LeadsListProps) {
   return (
     <Card className="flex-1 flex flex-col p-6 shadow-sm border border-border">
       <div className="flex items-center justify-between mb-4 border-b border-border pb-3">
@@ -19,23 +21,32 @@ export function LeadsList({ leads, onTriggerJob }: LeadsListProps) {
           {leads.length} leads
         </Badge>
       </div>
-      
+
       <div className="flex-1 overflow-y-auto space-y-2.5 pr-2 custom-scrollbar">
         {leads.map((lead) => (
-          <div key={lead.id} className="p-3.5 bg-card border border-border hover:bg-muted/50 rounded-xl flex items-center justify-between transition-colors shadow-sm">
-            <div className="space-y-1">
+          <div
+            key={lead.id}
+            className={cn(
+              'p-3.5 bg-card border rounded-xl flex items-center justify-between transition-colors shadow-sm cursor-pointer relative',
+              selectedId === lead.id
+                ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                : 'border-border hover:bg-muted/50'
+            )}
+            onClick={() => onSelect(lead)}
+          >
+            {/* 左侧选中指示器 */}
+            {selectedId === lead.id && (
+              <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-l-xl" />
+            )}
+
+            <div className="space-y-1 ml-1">
               <h4 className="font-semibold text-xs text-foreground">{lead.name}</h4>
               <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
+              <LeadRowSummary leadId={lead.id} />
             </div>
+
             <div className="flex items-center gap-4">
               <StatusBadge status={lead.status} showDot />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onTriggerJob(lead.id)}
-              >
-                立即执行
-              </Button>
             </div>
           </div>
         ))}
@@ -50,3 +61,5 @@ export function LeadsList({ leads, onTriggerJob }: LeadsListProps) {
     </Card>
   );
 }
+
+import { cn } from '@/lib/utils';

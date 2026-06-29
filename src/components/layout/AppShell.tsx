@@ -19,7 +19,7 @@ export function AppShell() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   // 用 hash 路由替代 useState<TabType>，桌面端 Tauri webview 友好（file:// 也能工作），
   // 浏览器刷新/前进后退/重启都能保留当前页面。
-  const { route, navigate } = useHashRoute('/dashboard');
+  const { route, navigate, setQuery } = useHashRoute('/dashboard');
 
 
   const { data: leads = [], refetch: refetchLeads } = useLeadsQuery(true);
@@ -27,7 +27,7 @@ export function AppShell() {
   const executeRpa = useExecuteRpaMutation();
   const { toast } = useToast();
 
-  const handleTriggerJob = (leadId: number) => {
+  const handleTriggerJob = (leadId: string) => {
     executeRpa.mutate(leadId, {
       onSuccess: (response) => {
         if (response.job_id) {
@@ -36,6 +36,12 @@ export function AppShell() {
             title: '任务启动成功',
             description: `微信加友任务已发出 (ID: ${response.job_id.slice(0, 8)})`,
             variant: 'success',
+          });
+          // P1-2 修复：原子化更新 URL，打开抽屉并定位到 Steps Tab
+          setQuery({
+            lead: leadId,
+            tab: 'steps',
+            job: response.job_id
           });
         }
       },

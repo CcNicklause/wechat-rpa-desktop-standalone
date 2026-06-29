@@ -17,6 +17,8 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { useDevTestStore } from '@/stores/useDevTestStore';
+import { registerJobStarted } from '@/hooks/useLeadJobs';
+import { useHashRoute } from '@/hooks/useHashRoute';
 import { JobProgress } from './JobProgress';
 
 interface BatchLeadRow {
@@ -112,6 +114,7 @@ const TEMPLATES = [
 export function DevTesting() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { navigate } = useHashRoute('/dashboard');
 
   const [batchRows, setBatchRows] = useState<BatchLeadRow[]>([makeDefaultRow(0)]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
@@ -457,6 +460,9 @@ export function DevTesting() {
       });
 
       if (response.job_id) {
+        // 2.5. Register job in useLeadJobs store for board visibility
+        registerJobStarted(lead.lead_id, response.job_id);
+
         // 一次性把 job_id / lead_id / 表单值写入 store，立刻持久到 localStorage
         startJobInStore({
           jobId: response.job_id,
@@ -662,17 +668,30 @@ export function DevTesting() {
         <Card className="min-h-[236px] p-6 border border-border bg-card flex flex-col gap-4">
           <div className="flex items-center justify-between pb-3 border-b border-border">
             <h3 className="font-semibold text-xs text-foreground tracking-wider">🧪 运行测试反馈控制台</h3>
-            {testJobId && jobFinished && (
-              <Button
-                size="sm"
-                variant="outline"
-                type="button"
-                className="h-6 px-2 text-[10px]"
-                onClick={clearJobInStore}
-              >
-                清空
-              </Button>
-            )}
+            <div className="flex gap-1">
+              {testJobId && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={() => navigate('/dashboard', { lead: testLeadId, job: testJobId, tab: 'steps' })}
+                >
+                  在看板查看
+                </Button>
+              )}
+              {testJobId && jobFinished && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={clearJobInStore}
+                >
+                  清空
+                </Button>
+              )}
+            </div>
           </div>
           {testJobId ? (
             <JobProgress

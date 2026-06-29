@@ -58,3 +58,13 @@ class CallSummaryResponse(BaseModel):
     lead_id: str
     status: LeadStatus
     next_action: str | None = None
+
+
+class LeadStatsResponse(BaseModel):
+    """Statistics for leads grouped by status categories."""
+    total: int = 0
+    success: int = 0  # WECHAT_ACCEPTED, WECHAT_ALREADY_FRIEND
+    running: int = 0  # CALLING, INTENT_CONFIRMED, RPA_PENDING_APPROVAL, RPA_EXECUTING, WECHAT_ADD_REQUESTED
+    failed: int = 0   # RPA_BLOCKED, RPA_FAILED, WECHAT_TARGET_NOT_FOUND, WECHAT_ADD_REJECTED, WECHAT_RISK_CONTROL, WECHAT_ACCEPTANCE_EXHAUSTED
+    neutral: int = 0  # NEW_LEAD, RPA_SIMULATED
+    status_counts: dict[str, int] = Field(default_factory=dict)  # Raw counts per individual status

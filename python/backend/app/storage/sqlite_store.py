@@ -159,6 +159,14 @@ class SQLiteStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def count_leads_by_status(self) -> dict[str, int]:
+        """Count leads grouped by their status."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                'SELECT status, COUNT(*) AS count FROM leads GROUP BY status'
+            ).fetchall()
+        return {row['status']: int(row['count']) for row in rows}
+
     def get_lead(self, lead_id: str) -> dict[str, Any] | None:
         with self._lock, self._connect() as conn:
             row = conn.execute('SELECT * FROM leads WHERE lead_id = ?', (lead_id,)).fetchone()

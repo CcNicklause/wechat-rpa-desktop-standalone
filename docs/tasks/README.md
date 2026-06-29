@@ -31,6 +31,7 @@
 | `rpa-hardening` | DONE | RPA 加微链路 P0/P1 加固，103 个后端测试通过 | [state.md](rpa-hardening/state.md) |
 | `login-system` | IMPLEMENTED | P0 真实登录与 session 恢复已落地；终端心跳后续推进 | [state.md](login-system/state.md) |
 | `rpa-terminal-reporting` | DONE | MGR 终端 record/heartbeat/status 3 接口已接入，9/9 用例联调全过；StrictMode 双触发 bug 已修 | [state.md](rpa-terminal-reporting/state.md) |
+| `frontend-leads-board` | DONE | 看板重构：双栏 + Lead 详情 Drawer（jobs/steps/timeline/raw），编译/构建通过 + 16 条用例核查 14 PASS / 2 OBSERVATION | [state.md](frontend-leads-board/state.md) |
 
 ## 可选任务线示例
 

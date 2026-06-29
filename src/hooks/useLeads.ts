@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { requestLocalApi } from '../lib/api';
 
 export interface Lead {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   status: string;
@@ -35,7 +35,7 @@ export function useAddLeadMutation() {
 export function usePrecheckMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (leadId: number) =>
+    mutationFn: (leadId: string) =>
       requestLocalApi('/api/v1/rpa/precheck', {
         method: 'POST',
         body: JSON.stringify({ lead_id: leadId })

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 
 from backend.app.api.deps import get_lead_service
 from backend.app.core.security import reject_batch_payload, require_auth
-from backend.app.schemas.lead import CallSummaryRequest, CallSummaryResponse, LeadCreateRequest, LeadResponse
+from backend.app.schemas.lead import CallSummaryRequest, CallSummaryResponse, LeadCreateRequest, LeadResponse, LeadStatsResponse
 from backend.app.services.lead_service import LeadService
 
 router = APIRouter(prefix='/api/v1/leads', tags=['leads'], dependencies=[Depends(require_auth)])
@@ -39,3 +39,11 @@ async def submit_summary(
     reject_batch_payload(payload_dict)
     payload = CallSummaryRequest(**payload_dict)
     return service.submit_summary(lead_id, payload)
+
+
+@router.get('/stats', response_model=LeadStatsResponse)
+def get_lead_stats(
+    service: LeadService = Depends(get_lead_service),
+):
+    """Get statistics for leads grouped by status categories."""
+    return service.compute_lead_stats()

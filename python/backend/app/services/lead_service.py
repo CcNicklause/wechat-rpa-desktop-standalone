@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from backend.app.core.audit import AuditLogger
 from backend.app.core.errors import AppError, not_found
 from backend.app.core.security import mask_phone
-from backend.app.schemas.lead import CallSummaryRequest, LeadCreateRequest, LeadStatus
+from backend.app.schemas.lead import CallSummaryRequest, LeadCreateRequest, LeadStatus, LeadStatsResponse
 from backend.app.storage.sqlite_store import SQLiteStore
 
 
@@ -99,6 +99,31 @@ class LeadService:
     def list_leads(self, limit: int = 100) -> list[dict]:
         leads = self.store.list_leads(limit)
         return [self._public_lead(lead) for lead in leads]
+
+    def compute_lead_stats(self) -> LeadStatsResponse:
+        """Compute lead statistics grouped by status categories."""
+        status_counts = self.store.count_leads_by_status()
+
+        # Define status groupings (matching frontend LEAD_STATUS_GROUPS)
+        success_statuses = {'WECHAT_ACCEPTED', 'WECHAT_ALREADY_FRIEND'}
+        running_statuses = {'CALLING', 'INTENT_CONFIRMED', 'RPA_PENDING_APPROVAL', 'RPA_EXECUTING', 'WECHAT_ADD_REQUESTED'}
+        failed_statuses = {'RPA_BLOCKED', 'RPA_FAILED', 'WECHAT_TARGET_NOT_FOUND', 'WECHAT_ADD_REJECTED', 'WECHAT_RISK_CONTROL', 'WECHAT_ACCEPTANCE_EXHAUSTED'}
+        neutral_statuses = {'NEW_LEAD', 'RPA_SIMULATED'}
+
+        total = sum(status_counts.values())
+        success = sum(status_counts.get(s, 0) for s in success_statuses)
+        running = sum(status_counts.get(s, 0) for s in running_statuses)
+        failed = sum(status_counts.get(s, 0) for s in failed_statuses)
+        neutral = sum(status_counts.get(s, 0) for s in neutral_statuses)
+
+        return LeadStatsResponse(
+            total=total,
+            success=success,
+            running=running,
+            failed=failed,
+            neutral=neutral,
+            status_counts=status_counts
+        )
 
     def get_lead(self, lead_id: str) -> dict:
         return self._require_lead(lead_id)
