@@ -1116,7 +1116,7 @@ def _fill_verify_message(
     _sleep(0.3)
 
     _clear_field()
-    _sleep(0.15)
+    _sleep(0.5)  # 原 0.15s → 0.5s：给微信 UI 线程完成清空渲染的时间，过快会卡死
     _paste_text_via_clipboard(greeting)
     mark("GREETING_FILLED_BY_VISION: 已精确定位输入框、清空默认文本并粘贴验证语")
 

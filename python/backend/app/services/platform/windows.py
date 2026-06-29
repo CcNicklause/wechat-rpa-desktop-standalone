@@ -256,7 +256,9 @@ class WindowsDesktopAdapter:
                 "KEYBOARD_DRIVER_UNAVAILABLE",
                 f"物理键盘输入依赖不可用，请安装 pyautogui: {exc}",
             ) from exc
+        import time
         pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.15)  # 给微信 UI 线程喘息时间，零间隔连续快捷键会导致卡死
         pyautogui.press("backspace")
 
 
