@@ -69,7 +69,8 @@ test('lead detail drawer layout is resilient in narrow windows', () => {
   assert.match(drawer, /lg:max-w-\[900px\]/);
   assert.match(drawer, /sm:max-w-none/);
   assert.doesNotMatch(drawer, /min\(820px/);
-  assert.match(drawer, /pr-14/);
+  assert.match(drawer, /pl-4 sm:pl-6 pt-5 pb-0 pr-16/);
+  assert.doesNotMatch(drawer, /px-4 sm:px-6 pt-5 pb-0 pr-14/);
   assert.doesNotMatch(drawer, /h-\[calc\(100vh-280px\)\]/);
   assert.match(drawer, /min-h-0 overflow-y-auto/);
   assert.match(drawer, /flex-wrap/);

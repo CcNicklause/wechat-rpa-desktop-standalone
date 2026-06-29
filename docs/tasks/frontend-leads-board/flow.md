@@ -496,7 +496,7 @@ pnpm -s build
 - 内容区使用 `flex-1 min-h-0 overflow-y-auto`。
 - 移除 `过程` Tab 的固定高度。
 - Footer 改为可换行布局，错误码允许 `break-all`。
-- Header 增加右侧内边距，给 Sheet 自带关闭按钮预留空间，避免与“重跑”按钮交错。
+- Header 使用独立左右内边距：`pl-4 sm:pl-6 ... pr-16`，给 Sheet 自带关闭按钮稳定预留空间，避免响应式 `px-*` 覆盖右侧预留后与“重跑”按钮交错。
 
 **LeadsList**
 - 选中态移除 `ring-1 ring-primary`，保留左侧指示条、浅色背景和轻描边。

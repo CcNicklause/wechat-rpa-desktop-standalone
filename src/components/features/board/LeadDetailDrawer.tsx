@@ -52,7 +52,7 @@ export function LeadDetailDrawer({
   return (
     <Sheet open={open} onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="right" className="w-full sm:w-[60vw] sm:max-w-none lg:max-w-[900px] p-0 flex flex-col overflow-hidden">
-        <SheetHeader className="px-4 sm:px-6 pt-5 pb-0 pr-14 shrink-0">
+        <SheetHeader className="pl-4 sm:pl-6 pt-5 pb-0 pr-16 shrink-0">
           <LeadHeader lead={lead} onTriggerJob={onTriggerJob} />
         </SheetHeader>
 
