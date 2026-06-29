@@ -28,3 +28,11 @@
 ## 当前等待
 
 Cycle 1 / 2 / 3 与 plan-agent 对账均已完成，P1-test 优化也已补齐。当前剩余为非阻塞优化清单：recover/reconciler 协同测试、终态 job report 回填 hardening、FastAPI lifespan 迁移。
+
+## 2026-06-29 追加：好友资料页误判未搜到
+
+- 最新数据：`job_b19f7d46d83b` / `lead_4b0c189d81aa` 搜索 `pixel_punk` 后，截图已是好友资料页，DB 却写为 `REAL_BIZ_TARGET_NOT_FOUND` / `WECHAT_TARGET_NOT_FOUND`。
+- 根因：`TARGET_NOT_FOUND` 关键词“搜索结果为空”被 `rapidfuzz.partial_ratio` 通过好友页里的“搜索”误命中；由于判定顺序早于 `ALREADY_FRIEND`，覆盖了“发消息”好友态。
+- 修复：`_detect_screen_state()` 内部在 `TARGET_NOT_FOUND` 与 `ALREADY_FRIEND` 同时参与时优先检查 `ALREADY_FRIEND`，仍保留 `RISK_CONTROL` 最高优先级。
+- 已补测试：好友资料页 OCR 包含“搜索 + 发消息/语音聊天”时返回 `ALREADY_FRIEND`。
+- 已跑：`uv run pytest backend/app/tests/test_vision_locator.py::TestScreenStateDetection -q`，`9 passed`；相关测试集 `42 passed`。

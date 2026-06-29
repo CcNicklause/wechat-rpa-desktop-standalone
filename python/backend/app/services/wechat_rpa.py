@@ -188,8 +188,12 @@ def _detect_screen_state(
 
     # 把所有词块拼成一整段文本，便于跨词块匹配长句
     full_text = "".join(w.text for w in words)
+    ordered_keys = list(state_keys)
+    if "TARGET_NOT_FOUND" in ordered_keys and "ALREADY_FRIEND" in ordered_keys:
+        ordered_keys.remove("ALREADY_FRIEND")
+        ordered_keys.insert(ordered_keys.index("TARGET_NOT_FOUND"), "ALREADY_FRIEND")
 
-    for key in state_keys:
+    for key in ordered_keys:
         keywords = SCREEN_STATE_KEYWORDS.get(key)
         if not keywords:
             continue

@@ -534,6 +534,24 @@ class TestScreenStateDetection(unittest.TestCase):
         self.assertEqual(state, "ALREADY_FRIEND")
 
     @patch('backend.app.services.wechat_rpa.vision')
+    def test_detect_already_friend_profile_before_search_false_positive(self, mock_vision):
+        from backend.app.services.wechat_rpa import _detect_screen_state
+        mock_vision.read_window_text.return_value = self._make_words(
+            "添 加 朋 友",
+            "pixel punk",
+            "搜 索",
+            "朋 友 资 料",
+            "发 消 息",
+            "微 信 号 ： pixel punk",
+            "语 音 聊 天",
+            "见 频 聊 天",
+        )
+
+        state = _detect_screen_state(MagicMock(), ["RISK_CONTROL", "TARGET_NOT_FOUND", "ALREADY_FRIEND"])
+
+        self.assertEqual(state, "ALREADY_FRIEND")
+
+    @patch('backend.app.services.wechat_rpa.vision')
     def test_detect_risk_control_priority(self, mock_vision):
         from backend.app.services.wechat_rpa import _detect_screen_state
         # 风控关键词排在前面 → 优先命中

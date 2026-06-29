@@ -250,3 +250,34 @@ $env:PYTHONPATH='.'; uv run pytest backend/app/tests
 
 STATUS: READY_FOR_REVIEW（Cycle 3）
 
+---
+
+## 2026-06-29 · 好友态误判 TARGET_NOT_FOUND 修复
+
+### 现象
+
+- 最新真实任务 `job_b19f7d46d83b` / `lead_4b0c189d81aa` 搜索 `pixel_punk` 后，截图已显示好友资料页，底部存在“发消息 / 语音聊天 / 视频聊天”。
+- DB 中该 job 仍被写为 `REAL_BIZ_TARGET_NOT_FOUND`，lead 被写为 `WECHAT_TARGET_NOT_FOUND`。
+
+### 根因
+
+- `_detect_screen_state()` 按传入顺序检测 `["RISK_CONTROL", "TARGET_NOT_FOUND", "ALREADY_FRIEND"]`。
+- `TARGET_NOT_FOUND` 关键词包含“搜索结果为空”，`fuzzy_text_hit()` 使用 `rapidfuzz.partial_ratio`，好友资料页 OCR 中的“搜索”会让该关键词得到高分误命中。
+- 因为 `TARGET_NOT_FOUND` 排在 `ALREADY_FRIEND` 前面，明确的“发消息”好友态来不及被判定。
+
+### 已落地
+
+- `_detect_screen_state()` 在 `TARGET_NOT_FOUND` 与 `ALREADY_FRIEND` 同时参与时，内部优先检查 `ALREADY_FRIEND`，但保留 `RISK_CONTROL` 的最高优先级。
+- 新增回归测试：好友资料页 OCR 同时包含“搜索”和“发消息/语音聊天”时，必须返回 `ALREADY_FRIEND`。
+
+### 验证
+
+```powershell
+cd python
+$env:PYTHONPATH='.'
+uv run pytest backend/app/tests/test_vision_locator.py::TestScreenStateDetection -q
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py -q
+```
+
+结果：`9 passed`；相关测试集 `42 passed`。
+
