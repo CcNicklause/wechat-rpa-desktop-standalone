@@ -56,22 +56,155 @@
 | C2-0 | Cycle 2 启动登记 | DONE | state.md（追加本章节） | 首次涉及后端改动 |
 | C2-1 | plan-agent: Cycle 2 设计 | DONE | plan.md 追加 Cycle 2 章节 | 需求 + 技术设计 + 测试清单已完成 |
 | C2-2 | coder-agent: Cycle 2 实施 | DONE | 代码 + flow.md（追加） | 后端 stats + 前端口径修正 + DevTesting 联通 |
-| C2-3 | plan-agent: Cycle 2 对账 | TODO | plan.md 追加对账清单 | 对齐事实与期望 |
-| C2-4 | test-agent: Cycle 2 测试 | DONE | 后端单测 + 回归 | 新增 5 个单测，108 个回归全通过 |
+| C2-3 | plan-agent: Cycle 2 对账 | DONE | plan.md 追加对账清单 | Cycle 2 已完整收敛，无 P0/P1 问题 |
+| C2-4 | test-agent: Cycle 2 测试 | ✅ DONE | 执行看板交互回归测试 | test.md 已更新 |
 
 ### Cycle 2 范围
 
 - ✅ **件 1**：前端 KPI 口径修正（抽离 `src/lib/leadStatus.ts`）
-- ✅ **件 2**：DevTesting 联通看板（移除"立即执行"按钮 + `registerJobStarted` + toast 跳转）
+- ✅ **件 2**：DevTesting 联通看板（移除"立即执行"按钮 + `registerJobStarted` + toast 跳转看板）
 - ✅ **件 3**：后端 KPI Stats 接口（`GET /api/v1/leads/stats` + 前端接入）
 - ✅ **新增**：后端单测 `python/backend/app/tests/test_lead_stats.py`（覆盖空库/单状态/多状态/全状态）
 - ✅ **不动**：`useDevTestStore`、重跑按钮完整流程、今日新增等 audit_events 基 KPI
 
 ### Cycle 2 当前等待
 
-- plan.md Cycle 2 章节已追加完成
-- coder-agent 已完成 Cycle 2 实施
-- 后端单测 + 回归已完成（108/108 全通过）
-- 下一步：plan-agent 对账
+- ✅ plan.md Cycle 2 章节已追加完成
+- ✅ coder-agent 已完成 Cycle 2 实施
+- ✅ 后端单测 + 回归已完成（108/108 全通过）
+- ✅ plan-agent 对账已完成，Cycle 2 已完整收敛，无 P0/P1 问题
+- ✅ test-agent 已完成 Cycle 2 测试，结果：ALL PASSED
+- 下一步：可发布
 
-STATUS: CYCLE2_DONE
+STATUS: CONVERGED
+
+---
+
+## Cycle 6 · 节点状态（详情抽屉用户视角收敛）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C6-0 | 口径确认 | DONE | state.md | 用户认可从技术 Tab 收敛为用户任务视角 |
+| C6-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 断言三 Tab 与旧 URL 映射 |
+| C6-2 | 前端实施 | DONE | `LeadOverviewPanel`、`LeadProcessPanel`、`LeadDetailDrawer` | 默认进入概览，过程合并日志与步骤，历史保留 job 列表 |
+| C6-3 | 验证 | DONE | 测试命令结果 | 6/6 前端文案测试通过，`pnpm build` 通过 |
+
+### Cycle 6 范围
+
+- ✅ 详情抽屉从 `执行记录/执行步骤/审计日志/原始数据` 收敛为 `概览/过程/历史`。
+- ✅ `概览` 提供状态、最近执行和下一步建议。
+- ✅ `过程` 合并关键日志与执行步骤。
+- ✅ `历史` 保留历史执行记录。
+- ✅ 旧 URL 的 `jobs/steps/timeline/raw` 映射到新 Tab。
+
+### Cycle 6 验证
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED
+
+---
+
+## Cycle 5 · 节点状态（详情 Tab 中文化 + 数据映射说明）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C5-0 | 需求登记 | DONE | state.md | 详情抽屉 Tab 仍有英文 |
+| C5-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 先断言中文 Tab 标签 |
+| C5-2 | 前端实施 | DONE | `src/lib/leadDetailTabs.ts` + `LeadDetailDrawer.tsx` | UI 标签中文化，URL key 不变 |
+| C5-3 | 映射说明 | DONE | flow.md | 记录四个 Tab 的数据来源和后端接口映射 |
+| C5-4 | 验证 | DONE | 测试命令结果 | 6/6 前端文案测试通过，`pnpm build` 通过 |
+
+### Cycle 5 范围
+
+- ✅ `Jobs/Steps/Timeline/Raw` 改为 `执行记录/执行步骤/审计日志/原始数据`。
+- ✅ URL 的 `tab=jobs|steps|timeline|raw` 保持不变，避免破坏刷新恢复和旧链接。
+- ✅ 在 `flow.md` 记录四个 Tab 对应的数据映射。
+
+### Cycle 5 验证
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED
+
+---
+
+## Cycle 4 · 节点状态（中文状态 + 最近线索列表提示）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C4-0 | 口径确认 | DONE | state.md | 暂不做全量滚动或分页加载 |
+| C4-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 状态中文与列表计数文案先测后实现 |
+| C4-2 | 前端实施 | DONE | `statusDisplay.ts`、`leadListCopy.ts`、看板组件修改 | 状态右侧展示，中文 Badge |
+| C4-3 | 验证 | DONE | 测试命令结果 | 5/5 前端文案测试通过，`pnpm build` 通过 |
+
+### Cycle 4 范围
+
+- ✅ 状态枚举映射为中文，不再在看板线索行露出 `RPA_BLOCKED` 等原始枚举。
+- ✅ 线索状态保持在每行右侧，不另起一行。
+- ✅ 列表计数从 `100 leads` 改为 `显示 N / 共 M`。
+- ✅ 增加提示：按最近更新时间排序，点击线索查看执行步骤与日志。
+- ✅ 暂不做全量滚动、分页或加载更多。
+
+### Cycle 4 验证
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 5/5 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED
+
+---
+
+## Cycle 3 · 节点状态（线索显示口径 + 全局审计栏收敛）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C3-0 | 需求登记 | DONE | plan.md/state.md | 使用当前 `frontend-leads-board` 任务线承接 |
+| C3-1 | TDD 测试 | DONE | `scripts/tests/leadDisplay.test.mjs` | 先验证 RED，再实现展示工具 |
+| C3-2 | 前端实施 | DONE | `src/lib/leadDisplay.ts` + 看板组件修改 | 账号主显示，备注存在才显示 |
+| C3-3 | 固定全局审计栏收敛 | DONE | `LeadsBoard.tsx` | 移除右侧常驻全局审计栏，保留 Drawer Timeline |
+| C3-4 | 验证 | DONE | 测试命令结果 | 3/3 展示测试通过，`pnpm build` 通过 |
+
+### Cycle 3 范围
+
+- ✅ 线索列表显示回到后端线索对象语义：`phone`/微信号为主，备注存在才显示。
+- ✅ 兼容后端 `lead_id/customer_name/phone_masked` 与旧前端 `id/name/phone` 字段。
+- ✅ 详情抽屉头部与列表复用同一显示规则。
+- ✅ 移除看板主区域固定右侧全局审计动态栏；单线索审计仍在 Timeline Tab 中查看。
+
+### Cycle 3 验证
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs
+```
+结果：✅ 3/3 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ 构建通过
+
+STATUS: CONVERGED

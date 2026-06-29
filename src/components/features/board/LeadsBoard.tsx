@@ -1,15 +1,12 @@
-import { Card } from '@/components/ui/card';
 import { KpiStrip } from './KpiStrip';
 import { LeadsList } from '../LeadsList';
-import { AuditList } from './AuditList';
 import { LeadDetailDrawer } from './LeadDetailDrawer';
 import { useHashRoute } from '@/hooks/useHashRoute';
 import { useLeadJobsStore, selectLatestJob } from '@/hooks/useLeadJobs';
 import { useLeadsStatsQuery } from '@/hooks/useLeadsStats';
 import { Lead } from '@/hooks/useLeads';
 import { AuditLog } from '@/hooks/useAudits';
-
-type TabType = 'jobs' | 'steps' | 'timeline' | 'raw';
+import { normalizeLeadDetailTab, type LeadDetailTab } from '@/lib/leadDetailTabs';
 
 interface LeadsBoardProps {
   leads: Lead[];
@@ -34,7 +31,7 @@ export function LeadsBoard({
 
   // 从 URL 读取状态
   const selectedLeadId = query.lead || null;
-  const selectedTab = (query.tab as TabType) || 'steps';
+  const selectedTab = normalizeLeadDetailTab(query.tab);
   const selectedJobId = query.job || null;
 
   // 找到选中的 lead
@@ -47,7 +44,7 @@ export function LeadsBoard({
     const latestJob = selectLatestJob(state, lead.id);
     setQuery({
       lead: lead.id,
-      tab: 'steps',
+      tab: 'overview',
       job: latestJob?.jobId || null,
     });
   };
@@ -62,7 +59,7 @@ export function LeadsBoard({
   };
 
   // 处理 Tab 切换
-  const handleTabChange = (tab: TabType) => {
+  const handleTabChange = (tab: LeadDetailTab) => {
     setQuery({ tab });
   };
 
@@ -75,22 +72,13 @@ export function LeadsBoard({
     <div className="flex-1 flex flex-col overflow-hidden p-6 gap-6">
       <KpiStrip leads={leads} stats={stats} />
 
-      <div className="flex-1 flex overflow-hidden gap-6 min-h-0">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         <LeadsList
           leads={leads}
+          totalCount={stats?.total}
           selectedId={selectedLeadId}
           onSelect={handleRowClick}
         />
-
-        {/* 右侧全局 Feed 列 */}
-        <div className="w-80 flex flex-col overflow-hidden min-h-0">
-          <Card className="flex-1 flex flex-col p-6 shadow-sm border border-border overflow-hidden min-h-0">
-            <div className="mb-4 pb-3 border-b border-border">
-              <h3 className="font-semibold text-xs text-foreground">全局审计动态</h3>
-            </div>
-            <AuditList audits={audits} />
-          </Card>
-        </div>
       </div>
 
       {/* 详情抽屉 */}

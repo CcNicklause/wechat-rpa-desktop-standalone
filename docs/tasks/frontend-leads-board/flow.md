@@ -351,3 +351,176 @@ cd python
 结果：✅ 108/108 测试全部通过
 
 STATUS: READY_FOR_REVIEW
+
+---
+
+## Cycle 3 · 实际落地流程
+
+### 线索显示规则
+
+**显示工具**：`src/lib/leadDisplay.ts`
+- 输入兼容后端字段与旧前端字段：`lead_id`、`id`、`account`、`phone`、`phone_masked`、`remark`、`add_reason`、`customer_name`、`name`。
+- 账号优先级：`account` → `phone` → `phone_masked` → `id` → `lead_id` → `-`。
+- 备注优先级：`remark` → `add_reason` → `customer_name` → `name`。
+- 如果备注为空，或备注与账号完全一致，则返回 `remark: null`，前端不渲染备注行。
+
+**列表展示**：`src/components/features/LeadsList.tsx`
+- 主行显示账号，使用等宽字体便于扫描手机号/微信号。
+- 备注存在时显示 `备注：...`；不存在时不占位。
+- 行内执行状态、选中高亮、`LeadRowSummary` 保持不变。
+
+**详情头部**：`src/components/features/board/LeadHeader.tsx`
+- 与列表复用同一显示规则。
+- `onTriggerJob` 改为可选；没有处理器时不渲染"重跑"按钮。
+
+### 后端字段兼容
+
+**useLeadsQuery**：`src/hooks/useLeads.ts`
+- 后端 `/api/v1/leads` 返回的 `lead_id/customer_name/phone_masked` 会在前端入口归一化为稳定的 `id/phone/name`。
+- 保留 `customer_name/phone_masked/account/remark/add_reason` 等原始兼容字段，供展示工具判断。
+
+### 全局审计栏
+
+**LeadsBoard**：`src/components/features/board/LeadsBoard.tsx`
+- 移除看板主区域固定右侧"全局审计动态"栏。
+- 主区域只保留线索列表，让列表获得完整宽度。
+- `AuditList` 组件仍保留，单线索审计继续通过详情 Drawer 的 Timeline Tab 查看。
+
+### Cycle 3 测试覆盖
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs
+```
+结果：✅ 3/3 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ TypeScript + Vite 构建通过
+
+---
+
+## Cycle 6 · 实际落地流程
+
+### 详情 Tab 收敛
+
+**Tab 标签与兼容映射**：`src/lib/leadDetailTabs.ts`
+- 新主 Tab：
+  - `overview` → `概览`
+  - `process` → `过程`
+  - `history` → `历史`
+- 旧 URL 兼容：
+  - `jobs` → `history`
+  - `steps` / `timeline` / `raw` → `process`
+  - 未知或缺省 → `overview`
+
+### 组件落地
+
+**LeadDetailDrawer**：`src/components/features/board/LeadDetailDrawer.tsx`
+- 只渲染 `概览 / 过程 / 历史` 三个 Tab。
+- 默认 Tab 由 `LeadsBoard` 使用 `normalizeLeadDetailTab()` 归一化。
+
+**概览**：`src/components/features/board/LeadOverviewPanel.tsx`
+- 展示目标账号、备注、当前状态、最近执行状态。
+- 根据线索状态给出下一步建议。
+- 展示最近一步进展，帮助用户快速判断是否需要重跑或人工处理。
+
+**过程**：`src/components/features/board/LeadProcessPanel.tsx`
+- 合并原 `审计日志` 和 `执行步骤` 两类信息。
+- 上半部分展示关键日志，下半部分展示当前 job 的执行步骤。
+
+**历史**：`src/components/features/board/LeadJobsPanel.tsx`
+- 保留历史 job 列表与切换能力。
+
+**默认入口**：
+- 点击线索行默认打开 `tab=overview`。
+- DevTesting 和任务启动成功后的跳转也默认打开 `tab=overview`。
+
+### Cycle 6 测试覆盖
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ TypeScript + Vite 构建通过
+
+---
+
+## Cycle 5 · 详情 Tab 中文化与数据映射说明
+
+### Tab 文案
+
+**Tab 标签工具**：`src/lib/leadDetailTabs.ts`
+- `jobs` → `执行记录`
+- `steps` → `执行步骤`
+- `timeline` → `审计日志`
+- `raw` → `原始数据`
+
+**详情抽屉**：`src/components/features/board/LeadDetailDrawer.tsx`
+- Tab UI 统一使用中文标签。
+- URL 参数仍保留稳定英文 key：`tab=jobs|steps|timeline|raw`，避免破坏旧链接与内部状态。
+
+### 数据映射
+
+| Tab | 中文名 | 展示组件 | 数据来源 | 后端映射 |
+|---|---|---|---|---|
+| `jobs` | 执行记录 | `LeadJobsPanel` | `useLeadJobsStore.leadToJobs` + `jobMeta` | 前端按 `leadId -> jobId[]` 缓存的执行记录；jobId 来自 `POST /api/v1/rpa/add-wechat` 返回值，快照到达后由 `GET /api/v1/rpa/jobs/{job_id}` / SSE 补齐状态 |
+| `steps` | 执行步骤 | `LeadStepsPanel` + `JobStepsView` | `useJobSnapshot(jobId)` | 优先读取本地 store 快照；兜底请求 `GET /api/v1/rpa/jobs/{job_id}`；实时更新来自 `GET /api/v1/rpa/jobs/{job_id}/events` SSE |
+| `timeline` | 审计日志 | `LeadTimelinePanel` + `AuditList` | `useAuditLogsQuery()` 后按手机号脱敏过滤 | 全局审计来自 `GET /api/v1/audit`；前端用 `phone_masked` 与当前线索账号脱敏值匹配 |
+| `raw` | 原始数据 | `LeadRawPanel` | `useLeadJobsStore.snapshots[jobId]` | 展示当前 job 的完整 `JobSnapshot` JSON，数据由 `GET /api/v1/rpa/jobs/{job_id}` / SSE 写入 store |
+
+### Cycle 5 测试覆盖
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 6/6 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ TypeScript + Vite 构建通过
+
+---
+
+## Cycle 4 · 实际落地流程
+
+### 状态中文映射
+
+**状态文案工具**：`src/lib/statusDisplay.ts`
+- 将 LeadStatus、RPA job status、审计 result、上游 state 等原始状态映射为中文标签。
+- `StatusBadge` 默认使用 `statusDisplayLabel(status)`，调用方仍可通过 `label` 显式覆盖。
+- 看板线索行右侧继续渲染 Badge，不进入左侧账号/备注信息流。
+
+### 最近线索列表说明
+
+**列表文案工具**：`src/lib/leadListCopy.ts`
+- `leadListCountText(visibleCount, totalCount)`：
+  - 有全库总数时显示 `显示 N / 共 M`。
+  - 无全库总数时显示 `显示 N 条`。
+- `LEAD_LIST_HINT` 固定为 `按最近更新时间排序，点击线索查看执行步骤与日志`。
+
+**列表组件**：`src/components/features/LeadsList.tsx`
+- 标题下方增加友好提示，说明点击行可查看执行步骤与日志。
+- 右侧计数从 `100 leads` 改为中文计数。
+- 状态 Badge 保持在右侧，使用 `shrink-0` 防止挤到下一行。
+
+**看板组件**：`src/components/features/board/LeadsBoard.tsx`
+- 将 `stats.total` 作为 `totalCount` 传给 `LeadsList`。
+- 不做全量滚动、分页或加载更多；列表仍代表后端默认返回的最近更新线索。
+
+### Cycle 4 测试覆盖
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：✅ 5/5 测试通过
+
+```powershell
+pnpm build
+```
+结果：✅ TypeScript + Vite 构建通过

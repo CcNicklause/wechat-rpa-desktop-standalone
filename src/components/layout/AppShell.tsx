@@ -39,10 +39,10 @@ export function AppShell() {
             description: `微信加友任务已发出 (ID: ${response.job_id.slice(0, 8)})`,
             variant: 'success',
           });
-          // P1-2 修复：原子化更新 URL，打开抽屉并定位到 Steps Tab
+          // 原子化更新 URL，打开抽屉并定位到用户视角概览。
           setQuery({
             lead: leadId,
-            tab: 'steps',
+            tab: 'overview',
             job: response.job_id
           });
         }

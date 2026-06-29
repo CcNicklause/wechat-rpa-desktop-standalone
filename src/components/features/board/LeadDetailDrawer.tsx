@@ -3,27 +3,25 @@ import { Sheet, SheetContent, SheetHeader, SheetFooter } from '@/components/ui/s
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { LeadHeader } from './LeadHeader';
+import { LeadOverviewPanel } from './LeadOverviewPanel';
+import { LeadProcessPanel } from './LeadProcessPanel';
 import { LeadJobsPanel } from './LeadJobsPanel';
-import { LeadStepsPanel } from './LeadStepsPanel';
-import { LeadTimelinePanel } from './LeadTimelinePanel';
-import { LeadRawPanel } from './LeadRawPanel';
 import { useLeadJobsStore, selectLeadJobs, selectLatestJob } from '@/hooks/useLeadJobs';
 import { useShallow } from 'zustand/react/shallow';
 import { Lead } from '@/hooks/useLeads';
 import { AuditLog } from '@/hooks/useAudits';
-
-type TabType = 'jobs' | 'steps' | 'timeline' | 'raw';
+import { LEAD_DETAIL_TAB_LABELS, type LeadDetailTab } from '@/lib/leadDetailTabs';
 
 interface LeadDetailDrawerProps {
   open: boolean;
   lead: Lead | null;
   audits: AuditLog[];
-  tab: TabType;
+  tab: LeadDetailTab;
   jobId: string | null;
   onClose: () => void;
-  onTabChange: (tab: TabType) => void;
+  onTabChange: (tab: LeadDetailTab) => void;
   onJobChange: (jobId: string) => void;
-  onTriggerJob: (leadId: number) => void;
+  onTriggerJob?: (leadId: string) => void;
 }
 
 export function LeadDetailDrawer({
@@ -58,35 +56,30 @@ export function LeadDetailDrawer({
           <LeadHeader lead={lead} onTriggerJob={onTriggerJob} />
         </SheetHeader>
 
-        <Tabs value={tab} onValueChange={(v) => onTabChange(v as TabType)} className="flex-1 flex flex-col">
+        <Tabs value={tab} onValueChange={(v) => onTabChange(v as LeadDetailTab)} className="flex-1 flex flex-col">
           <div className="px-6 pt-2">
             <TabsList>
-              <TabsTrigger value="jobs">Jobs</TabsTrigger>
-              <TabsTrigger value="steps">Steps</TabsTrigger>
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="raw">Raw</TabsTrigger>
+              <TabsTrigger value="overview">{LEAD_DETAIL_TAB_LABELS.overview}</TabsTrigger>
+              <TabsTrigger value="process">{LEAD_DETAIL_TAB_LABELS.process}</TabsTrigger>
+              <TabsTrigger value="history">{LEAD_DETAIL_TAB_LABELS.history}</TabsTrigger>
             </TabsList>
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 pt-2">
-            <TabsContent value="jobs">
+            <TabsContent value="overview">
+              <LeadOverviewPanel lead={lead} latestJob={latestJob} />
+            </TabsContent>
+
+            <TabsContent value="process" className="h-[calc(100vh-280px)]">
+              <LeadProcessPanel lead={lead} audits={audits} jobId={actualJobId} />
+            </TabsContent>
+
+            <TabsContent value="history">
               <LeadJobsPanel
                 leadId={leadIdStr}
                 selectedJobId={actualJobId}
                 onSelectJob={onJobChange}
               />
-            </TabsContent>
-
-            <TabsContent value="steps" className="h-[calc(100vh-280px)]">
-              <LeadStepsPanel jobId={actualJobId} />
-            </TabsContent>
-
-            <TabsContent value="timeline" className="h-[calc(100vh-280px)]">
-              <LeadTimelinePanel lead={lead} audits={audits} />
-            </TabsContent>
-
-            <TabsContent value="raw" className="h-[calc(100vh-280px)]">
-              <LeadRawPanel jobId={actualJobId} />
             </TabsContent>
           </div>
         </Tabs>

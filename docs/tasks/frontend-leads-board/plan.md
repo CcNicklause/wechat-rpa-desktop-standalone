@@ -263,6 +263,88 @@ STATUS: CONVERGED
 
 ---
 
+## Cycle 3 · 线索列表显示口径与全局审计栏收敛
+
+### 需求
+
+用户反馈当前看板线索列表仍偏死板，展示应回到后端定义的线索对象语义：主信息显示 `phone` 或微信号，辅助信息只在备注存在时显示。备注优先取明确备注字段；如果后端当前没有独立备注字段，则兼容 `add_reason`、`customer_name`、`name`。
+
+同时，全局审计日志不应作为看板固定右栏常驻。主看板需要优先服务线索扫描和下钻；审计信息保留在线索详情 Drawer 的 Timeline Tab 中。
+
+### 设计
+
+1. 新增 `src/lib/leadDisplay.ts`，集中处理线索显示规则，避免列表和详情头部分别猜字段。
+2. `useLeadsQuery` 在入口对后端 `lead_id/customer_name/phone_masked` 和旧前端 `id/name/phone` 结构做兼容归一化。
+3. `LeadsList` 行内主标题显示账号，备注存在时显示 `备注：...`，没有备注则不占位。
+4. `LeadHeader` 使用相同显示规则，详情抽屉头部与列表保持一致。
+5. `LeadsBoard` 移除固定右侧全局审计栏；全局审计组件仍保留给旧入口/其他页面复用，单线索审计继续在 Timeline Tab 中查看。
+
+### 测试清单
+
+| 用例 | 期望 | 验证 |
+|---|---|---|
+| 后端线索仅有 `customer_name + phone_masked` | 账号显示 `phone_masked`，备注显示 `customer_name` | `node --test scripts/tests/leadDisplay.test.mjs` |
+| 线索有显式微信号和备注 | 优先显示 `account` 与 `remark` | `node --test scripts/tests/leadDisplay.test.mjs` |
+| 备注与账号重复或不存在 | 不显示备注行 | `node --test scripts/tests/leadDisplay.test.mjs` |
+| 看板构建 | TypeScript + Vite 构建通过 | `pnpm build` |
+
+---
+
+## Cycle 6 · 详情抽屉用户视角收敛
+
+### 需求
+
+用户认可当前详情抽屉不应继续暴露 `执行记录/执行步骤/审计日志/原始数据` 四个技术 Tab。日常用户需要的是任务视角：看懂当前状态、最近进展、过程和历史，而不是直接面对 job/snapshot/raw JSON。
+
+### 设计
+
+1. 详情 Tab 收敛为 `概览 / 过程 / 历史`。
+2. `概览` 默认展示账号、备注、当前状态、最近执行状态、下一步建议和最近进展。
+3. `过程` 合并关键日志与执行步骤，避免把 `审计日志` 和 `执行步骤` 拆成两个主入口。
+4. `历史` 保留历史执行记录，用于多次重跑/排障。
+5. `原始数据` 不再作为主 Tab 暴露；相关组件暂保留，后续如需可放入开发模式入口。
+6. 旧 URL 兼容：
+   - `tab=jobs` → `history`
+   - `tab=steps|timeline|raw` → `process`
+   - 未知或缺省 → `overview`
+
+### 测试清单
+
+| 用例 | 期望 | 验证 |
+|---|---|---|
+| Tab 文案 | 仅有 `概览/过程/历史` | `node --test scripts/tests/boardCopy.test.mjs` |
+| 旧 Tab URL | 映射到新 Tab | `node --test scripts/tests/boardCopy.test.mjs` |
+| 看板构建 | TypeScript + Vite 构建通过 | `pnpm build` |
+
+---
+
+## Cycle 4 · 看板中文文案与最近线索列表说明
+
+### 需求
+
+看板内暂时不要露出英文状态枚举；状态应映射为中文，并继续放在每条线索的右侧。列表计数不能显示 `100 leads`，需要解释它是当前列表展示数量，并与全库总数对应起来。
+
+本轮明确不做全量滚动或分页加载，列表继续展示后端默认返回的最近更新 100 条线索。
+
+### 设计
+
+1. 新增状态中文映射工具 `src/lib/statusDisplay.ts`，`StatusBadge` 默认使用中文标签。
+2. 新增列表文案工具 `src/lib/leadListCopy.ts`，统一输出 `显示 N / 共 M` 或 `显示 N 条`。
+3. `LeadsList` 标题下增加提示：`按最近更新时间排序，点击线索查看执行步骤与日志`。
+4. `LeadsList` 接收 `totalCount`，由 `LeadsBoard` 传入 `stats.total`，解释列表数量与全库总数的差异。
+5. 状态 Badge 保持在每行右侧，不进入账号/备注文本流。
+
+### 测试清单
+
+| 用例 | 期望 | 验证 |
+|---|---|---|
+| LeadStatus 原始枚举 | 显示中文状态 | `node --test scripts/tests/boardCopy.test.mjs` |
+| 列表计数有全库总数 | 显示 `显示 100 / 共 206` | `node --test scripts/tests/boardCopy.test.mjs` |
+| 列表计数无全库总数 | 显示 `显示 4 条` | `node --test scripts/tests/boardCopy.test.mjs` |
+| 看板构建 | TypeScript + Vite 构建通过 | `pnpm build` |
+
+---
+
 ## Cycle 2 · 看板数据流真实化 + DevTesting 联通
 
 ### 业务背景与范围
@@ -600,6 +682,45 @@ export function useLeadsStatsQuery(options?: { enabled?: boolean }) {
 
 ---
 
+### Cycle 2 对账与优化清单
+
+| 优先级 | 项目 | 原因 | 建议处理 |
+|-------|------|------|---------|
+| **P2** | 状态分组定义偏差 | 计划中 SUCCESS 仅包含 `WECHAT_ACCEPTED`，NEUTRAL 包含 `NEW_LEAD, WECHAT_ALREADY_FRIEND`，实际实现与计划一致，偏差不存在 | - |
+| **P3** | KpiStrip 成功率公式优化 | stats 模式中成功率应该用 `stats.success / stats.total`，但实际 NEUTRAL 状态计入总数，与计划中的统计逻辑一致 | 可接受 |
+| **P3** | LeadsBoard 可选 props 实现 | LeadsBoard 接受 `stats?: any` 不够类型安全，应该用 `stats?: LeadStats | null` | 可后续优化 |
+
+### Cycle 2 对账结论
+
+✅ **Cycle 2 已完整收敛，无 P0/P1 问题，可以进入测试环节**。
+
+---
+
+### Cycle 2 测试用例覆盖核查
+
+对照 flow.md + 源码逐条评估：
+
+| ID | 分类 | 用例 | 状态 | 说明 |
+|----|------|------|------|------|
+| C2-A1 | KPI 口径 | 状态分组判定 | ✅ | `leadStatus.ts` 已实现正确分组，NEUTRAL 状态不计入 running/failure |
+| C2-A2 | KPI 口径 | 全库 stats 正常 | ✅ | KpiStrip 接受 stats prop，副标题正确切换为"全库实时计数" |
+| C2-A3 | KPI 口径 | stats 接口失败 | ✅ | `useLeadsStatsQuery` retry: false，失败时静默降级到本地计算 |
+| C2-B1 | DevTesting 联通 | DevTesting 触发 job | ✅ | DevTesting onSubmit 调用 `registerJobStarted`，toast 有"在看板查看"按钮，点击后正确跳转 hash |
+| C2-B2 | DevTesting 联通 | 看板 LeadsList 无"立即执行" | ✅ | LeadsList 已移除按钮，`onTriggerJob` prop 改为可选 |
+| C2-B3 | DevTesting 联通 | LeadHeader 文案 | ✅ | LeadHeader 按钮文案已改为"重跑" |
+| C2-B4 | DevTesting 联通 | lead.id 类型 | ✅ | Lead.id 已改为 string，AppShell/LeadsBoard/LeadsList 均移除 parseInt 残留 |
+| C2-C1 | 后端 stats | 空库统计 | ✅ | 单测已覆盖，by_status 包含所有 15 个状态 |
+| C2-C2 | 后端 stats | 各状态覆盖 | ✅ | 后端分组正确，单测覆盖空库/单状态/混合状态/所有状态一次 |
+| C2-C3 | 后端 stats | 鉴权 | ✅ | stats 路由使用 `require_auth` dep，单测验证无 token 401 |
+
+---
+
+### Cycle 2 总体评估
+
+✅ **Cycle 2 核心功能完整实现，所有测试用例覆盖，无 P0/P1 问题，可以进入测试环节**。
+
+---
+
 ### 划清范围重申
 
 ✅ **在范围内**：
@@ -615,3 +736,4 @@ export function useLeadsStatsQuery(options?: { enabled?: boolean }) {
 - LeadHeader 重跑按钮的完整流程改造（仍直调 add-wechat）
 - `useDevTestStore` 改造（不动）
 
+STATUS: CONVERGED

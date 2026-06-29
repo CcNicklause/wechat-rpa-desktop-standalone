@@ -675,7 +675,7 @@ export function DevTesting() {
                   variant="outline"
                   type="button"
                   className="h-6 px-2 text-[10px]"
-                  onClick={() => navigate('/dashboard', { lead: testLeadId, job: testJobId, tab: 'steps' })}
+                  onClick={() => navigate('/dashboard', { lead: testLeadId, job: testJobId, tab: 'overview' })}
                 >
                   在看板查看
                 </Button>

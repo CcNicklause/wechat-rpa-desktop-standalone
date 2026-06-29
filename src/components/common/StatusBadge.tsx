@@ -1,4 +1,5 @@
 import { Badge, type BadgeProps } from '../ui/badge';
+import { statusDisplayLabel } from '@/lib/statusDisplay';
 
 type BadgeVariant = NonNullable<BadgeProps['variant']>;
 
@@ -93,7 +94,7 @@ export function StatusBadge({
   showDot = false,
 }: StatusBadgeProps) {
   // 使用 || 而不是 ??：空字符串也应该回退到 status / '-'，避免渲染空 Badge。
-  const display = label || status || '-';
+  const display = label || statusDisplayLabel(status);
 
   return (
     <Badge variant={statusBadgeVariant(status)} className={className} showDot={showDot}>

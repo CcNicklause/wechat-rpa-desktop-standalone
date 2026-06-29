@@ -57,7 +57,7 @@ export function KpiStrip({ leads, stats, className }: KpiStripProps) {
       <Card className="border border-border shadow-sm bg-card hover:shadow transition-shadow">
         <CardContent className="p-4 flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">RPA 执行中</p>
+            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">执行中</p>
             <h3 className="text-2xl font-bold text-blue-600 dark:text-blue-500">{running}</h3>
             <p className="text-[9px] text-muted-foreground">客户端引擎正在操作的队列数</p>
           </div>
