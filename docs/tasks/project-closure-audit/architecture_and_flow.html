@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 网页标题 -->
+    <title>微信 RPA 桌面端 — 架构与全生命周期闭环流程图</title>
+    <!-- 引入外部 CSS 及 JavaScript 依赖 -->
+    <!-- Tailwind CSS：用于快速构建深色科技感的 UI 布局 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Mermaid JS -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        // 初始化 Mermaid 的暗黑主题配置
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            securityLevel: 'loose',
+            themeVariables: {
+                background: '#0f172a',
+                primaryColor: '#38bdf8',
+                primaryTextColor: '#f8fafc',
+                lineColor: '#64748b',
+                signalColor: '#10b981',
+                secondaryColor: '#1e293b',
+                tertiaryColor: '#0f172a'
+            }
+        });
+    </script>
+    <!-- 自定义基础样式 -->
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+        }
+        h1, h2, h3, .font-outfit {
+            font-family: 'Outfit', sans-serif;
+        }
+        /* 美化滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #030712;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f2937;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #374151;
+        }
+        /* 玻璃拟态面板样式 */
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        /* 解决 Mermaid 在 display:none 下计算尺寸失败导致 Syntax error 的终极 Hack */
+        .tab-hidden {
+            position: absolute !important;
+            top: -9999px !important;
+            left: -9999px !important;
+            visibility: hidden !important;
+            opacity: 0;
+            height: 0;
+            overflow: hidden;
+        }
+        .tab-active {
+            position: relative !important;
+            visibility: visible !important;
+            opacity: 1;
+            height: auto;
+        }
+        /* 霓虹发光 hover 动画特效 */
+        .neon-border-cyan:hover {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+            border-color: rgba(6, 182, 212, 0.4);
+        }
+        .neon-border-violet:hover {
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+        .neon-border-emerald:hover {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-16 overflow-y-scroll">
+
+    <!-- 顶部状态栏及导航区 -->
+    <header class="w-full py-8 border-b border-gray-800 bg-gray-950 bg-opacity-80 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <!-- 标志图标 -->
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-white tracking-wide">微信 RPA 桌面端独立版</h1>
+                    <p class="text-xs text-gray-400">系统拓扑 · 核心数据链路 · 全生命周期闭环审计可视化</p>
+                </div>
+            </div>
+            <!-- 状态标签组 -->
+            <div class="flex gap-2">
+                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    审计状态：已对账完成
+                </span>
+                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    版本：独立版 1.0
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主体区域 -->
+    <main class="max-w-7xl mx-auto px-6 mt-8">
+        
+        <!-- 切换视图导航标签卡 -->
+        <div class="flex border-b border-gray-800 gap-2 mb-8 overflow-x-auto pb-1">
+            <button onclick="switchTab('arch')" id="tab-btn-arch" class="tab-btn px-6 py-3 text-sm font-medium border-b-2 border-cyan-500 text-cyan-400 transition-all">
+                整体系统拓扑
+            </button>
+            <button onclick="switchTab('jobflow')" id="tab-btn-jobflow" class="tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-all">
+                加友与对账核心流
+            </button>
+            <button onclick="switchTab('dataflow')" id="tab-btn-dataflow" class="tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-all">
+                数据流与对账机制
+            </button>
+            <button onclick="switchTab('audit')" id="tab-btn-audit" class="tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition-all">
+                全项目闭环审计结论
+            </button>
+        </div>
+
+        <!-- 1. 整体系统拓扑板块 -->
+        <section id="tab-content-arch" class="tab-content tab-active animate-fadeIn">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- 拓扑关系图 -->
+                <div class="lg:col-span-2 glass-panel rounded-2xl p-6 shadow-xl">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span> 系统模块拓扑结构图
+                    </h3>
+                    <div class="mermaid w-full overflow-x-auto bg-slate-900 rounded-xl p-4 border border-gray-800 flex justify-center">
+graph TD
+    subgraph UI ["客户端前端界面 (Vite + React 19)"]
+        A1["React 页面视图"] -->|Zustand 状态状态机| A2["Auth 登录 / Lead 线索 / DevTest 测试 / Upstream 配置 Store"]
+        A1 -->|React Query 异步钩子| A3["本地 API 客户端"]
+    end
+
+    subgraph Desktop ["Tauri 桌面容器 (Rust)"]
+        B1["Tauri App 壳体"] -->|注册命令| B2["Tauri 命令处理器"]
+        B2 -->|保存与读取| B3["portal-session.json 本地会话"]
+        B1 -->|进程孵化 Sidecar| C1["FastAPI 本地接口服务"]
+        B2 -->|HTTP 隧道透传| B4["Web Portal API 端点"]
+    end
+
+    subgraph Sidecar ["Python 侧端引擎 (RPA Sidecar)"]
+        C1 -->|FastAPI 路由分发| C2["RPA 业务编排器"]
+        C2 -->|频率控制与熔断器| C3["RateLimit 额度守卫"]
+        C2 -->|对账守护循环| C4["Friend Acceptance 好友复查器"]
+        C2 -->|物理桌面操控| C5["Windows 桌面平台适配器"]
+        C5 -->|uiautomation / PyAutoGUI| C6["微信客户端"]
+        C5 -->|WinRT OCR / 视觉定位| C7["OCR 读屏与状态分析器"]
+    end
+
+    subgraph Data ["本地持久化数据区"]
+        C1 -->|SQLite 驱动| D1["demo.db SQLite 数据库"]
+        C2 -->|追加审计日志| D2["audit.jsonl 文件"]
+    end
+
+    A3 -->|HTTP 请求带本地 Token| C1
+    A1 -.->|fetch 异步事件流读取| C1
+    B4 <-->|登录认证 / 状态同步 / 心跳上报| Upstream["上游云端 MGR"]
+    C4 -.->|通过 OCR 检查好友状态| C6
+                    </div>
+                    <div class="mt-4 text-xs text-gray-400 leading-relaxed bg-gray-900/50 p-4 rounded-xl border border-gray-800/50">
+                        <strong>说明：</strong> 本系统包含四个核心子系统。前端（React）和本地 API 服务（Python FastAPI）通过具有本地 Bearer Token 的 API 客户端隔离交互。Tauri 运行时负责承载外层窗口和会话文件持久化。Python RPA 侧端通过 UIAutomation 原生键鼠、OCR 识别与微信客户端交互，并将所有数据落盘在 SQLite 本地库（demo.db）和本地审计日志（audit.jsonl）中。
+                    </div>
+                </div>
+
+                <!-- 模块细节介绍卡片组 -->
+                <div class="flex flex-col gap-6">
+                    <div class="glass-panel rounded-2xl p-6 neon-border-cyan transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <!-- 前端模块卡片 -->
+                            <span class="text-xs font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-2.5 py-1 rounded">Front-End (前端)</span>
+                            <span class="text-xs text-gray-500 font-mono">React 19 + Zustand</span>
+                        </div>
+                        <h4 class="text-base font-bold text-white mb-2">Vite 桌面工作台</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                            由 React 19 构建的高性能单页看板。利用 Zustand 管理会话，通过 React Query 对本地 API 服务进行以 8 秒为周期的轮询数据拉取。
+                        </p>
+                        <div class="border-t border-gray-800 pt-3 flex flex-wrap gap-1.5">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">LeadsBoard (线索看板)</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">useHashRoute (哈希路由)</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">StatusBar (状态栏)</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-6 neon-border-violet transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <!-- Tauri Rust 模块卡片 -->
+                            <span class="text-xs font-bold uppercase tracking-wider text-violet-400 bg-violet-950 px-2.5 py-1 rounded">Tauri Rust (桌面容器)</span>
+                            <span class="text-xs text-gray-500 font-mono">Cargo + Tauri Commands</span>
+                        </div>
+                        <h4 class="text-base font-bold text-white mb-2">Rust 桌面进程宿主</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                            桌面应用程序的运行容器。通过 Rust 语言编写底层 Tauri App，并在启动时动态孵化 Python 本地 API 进程（RPA Sidecar），在应用退出时调用系统清理方法，防止出现僵尸进程。
+                        </p>
+                        <div class="border-t border-gray-800 pt-3 flex flex-wrap gap-1.5">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">src-tauri/lib.rs</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">portal-session.json</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">offline_report (离线上报)</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-6 neon-border-emerald transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <!-- Python RPA 模块卡片 -->
+                            <span class="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950 px-2.5 py-1 rounded">Python RPA (执行侧端)</span>
+                            <span class="text-xs text-gray-500 font-mono">FastAPI + Windows UIA</span>
+                        </div>
+                        <h4 class="text-base font-bold text-white mb-2">本地 RPA 侧端引擎</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                            核心执行服务。以 FastAPI 在本地端口拉起轻量服务，使用 uiautomation + WinRT OCR 识别驱动微信执行自动化搜索、添加与复查好友对账逻辑。
+                        </p>
+                        <div class="border-t border-gray-800 pt-3 flex flex-wrap gap-1.5">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">rpa_orchestrator</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">windows_adapter</span>
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-900 text-gray-400">friend_rechecker</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. 加友与对账核心流板块 -->
+        <section id="tab-content-jobflow" class="tab-content tab-hidden animate-fadeIn">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- 加友逻辑状态流图 -->
+                <div class="lg:col-span-2 glass-panel rounded-2xl p-6 shadow-xl">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span> RPA 执行与好友复查判定全流程
+                    </h3>
+                    <div class="mermaid w-full overflow-x-auto bg-slate-900 rounded-xl p-4 border border-gray-800 flex justify-center">
+graph TD
+    N1["1 发起加友请求"] --> N2["2 点击微信加号打开添加页面"]
+    N2 --> N3["3 输入手机号并回车检索"]
+    N3 --> N4["4 捕获画面并做读屏状态判定"]
+
+    N4 -->|已是好友| N5["显示发消息按钮"]
+    N4 -->|无此账号| N6["提示无法找到该用户"]
+    N4 -->|风控频繁| N7["提示操作过于频繁"]
+    N4 -->|出现添加按钮| N8["5 点击添加到通讯录"]
+
+    N8 --> N9["6 检测是否弹出申请验证窗口"]
+    N9 -->|弹出验证窗口| N10["7 模拟全选清空并粘贴验证语"]
+    N9 -->|无窗口直接通过| N11["8 加友申请已成功发出"]
+    N9 -->|超时无窗口| N12["报错未找到验证窗口"]
+
+    N10 --> N13["9 点击确定发送验证信息"]
+    N13 --> N14["10 发送动作后屏幕二次核验"]
+    N14 -->|发送成功| N11
+    N14 -->|风控频繁| N7
+    N14 -->|其他未知状态| N15["结果不确定等待对账"]
+
+    N5 --> N16["任务完成并记录已是好友"]
+    N6 --> N17["任务完成并记录无此人"]
+    N7 --> N18["任务异常并开启熔断保护"]
+    N11 --> N19["任务完成并记录已申请"]
+
+    N19 --> N20["11 对账工作流启动进行周期轮询"]
+    N20 --> N21["12 微信全局搜索框再次检索"]
+    N21 --> N22["13 比对用户详细资料页状态"]
+    N22 -->|已同意申请| N23["对账成功更新线索为已通过"]
+    N22 -->|未同意未超限| N24["增加已申请天数等待下次轮询"]
+    N22 -->|重试超限| N25["对账失败转为超限放弃状态"]
+                    </div>
+                </div>
+
+                <!-- 文字描述列表 -->
+                <div class="flex flex-col gap-6">
+                    <div class="glass-panel rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-3">关键防御：屏幕状态判定 (S-1/S-2)</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-4">
+                            为了防止 UI 漂移以及误操作，每次搜索后都会捕获微信当前截图，然后通过基于 <strong>WinRT OCR</strong> 的文字识别提取全页面词块进行模糊匹配判定。
+                        </p>
+                        <div class="space-y-3">
+                            <div class="flex items-start gap-2.5">
+                                <span class="w-5 h-5 rounded-full bg-cyan-900 text-cyan-400 flex items-center justify-center text-[10px] font-bold mt-0.5">1</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">极速判定已是好友</strong>
+                                    出现“发消息”或“音视频通话”等特征词直接置为 ALREADY_FRIEND 状态。
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-2.5">
+                                <span class="w-5 h-5 rounded-full bg-amber-900 text-amber-400 flex items-center justify-center text-[10px] font-bold mt-0.5">2</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">精准拦截账号不存在</strong>
+                                    通过“该用户不存在”等词命中 TARGET_NOT_FOUND 状态，直接阻断以防误加。
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-2.5">
+                                <span class="w-5 h-5 rounded-full bg-red-900 text-red-400 flex items-center justify-center text-[10px] font-bold mt-0.5">3</span>
+                                <div class="text-xs">
+                                    <strong class="text-white block">风控熔断保护</strong>
+                                    发现“操作频繁”或“账号异常”即刻置为 RISK_CONTROL 状态，开启全天任务熔断保护设备。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-3">原生按键稳定性设计</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                            旧版通过 pyautogui 高频模拟组合键容易导致 modifier key 粘滞卡死微信 UI 线程。升级方案采用 <strong>Windows 原生 UIAutomation 驱动</strong>：
+                        </p>
+                        <ul class="text-xs text-gray-300 list-disc list-inside space-y-2">
+                            <li>使用 <code class="text-cyan-400 bg-gray-900 px-1 py-0.5 rounded font-mono">SendKeys("{Ctrl}a{BackSpace}")</code> 完成原生无感全选与删除。</li>
+                            <li>使用 <code class="text-cyan-400 bg-gray-900 px-1 py-0.5 rounded font-mono">SendKeys("{Ctrl}v")</code> 实现无剪贴板残留的安全粘贴。</li>
+                            <li>在清空输入框 and 粘贴动作之间维持 <code class="text-violet-400 font-mono">0.5秒</code> 的安全渲染延时。</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. 数据流向与对账机制板块 -->
+        <section id="tab-content-dataflow" class="tab-content tab-hidden animate-fadeIn">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- 交互数据流时序图 -->
+                <div class="lg:col-span-2 glass-panel rounded-2xl p-6 shadow-xl">
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> 数据流与上报信箱 (Outbox) 对账架构
+                    </h3>
+                    <div class="mermaid w-full overflow-x-auto bg-slate-900 rounded-xl p-4 border border-gray-800 flex justify-center">
+sequenceDiagram
+    autonumber
+    participant UI as 前端 Web 看板
+    participant DB as SQLite 本地库
+    participant Orch as RPA 编排引擎
+    participant Check as 后台对账 Worker
+    participant Out as 上报发信箱
+    participant Cloud as 上游 MGR 接口
+
+    UI->>Orch: 触发加好友请求
+    Orch->>DB: 写入 rpa_jobs 任务为执行中
+    Orch->>Orch: 启动微信 RPA 物理流程
+    alt 已是好友
+        Orch->>DB: 写入对账报告 PENDING
+        Orch->>DB: 更新 rpa_jobs 状态为成功
+    else 验证信息发送成功
+        Orch->>DB: 更新 leads 状态为已申请
+        Orch->>DB: 更新 rpa_jobs 状态为成功
+    end
+    
+    Note over Check: 后台定时对账与状态同步
+    loop 循环轮询
+        Check->>DB: 查询 leads 已申请的线索
+        Check->>Check: 微信窗口搜索该号码以复查
+        alt 好友同意通过
+            Check->>DB: 写入对账报告同意 PENDING
+            Check->>DB: 更新 leads 状态为已通过
+        else 超过限额 12 次重试未过
+            Check->>DB: 写入对账报告拒绝 PENDING
+            Check->>DB: 更新 leads 状态为超限放弃
+        end
+    end
+
+    loop 循环检查发信箱
+        Out->>DB: 查询 PENDING 状态对账报告
+        Out->>Cloud: 接口上报好友对账数据
+        Cloud->>Out: 返回上报成功响应
+        Out->>DB: 将报告标记为 SENT 已上报
+    end
+                    </div>
+                    <div class="mt-4 text-xs text-gray-400 leading-relaxed bg-gray-900/50 p-4 rounded-xl border border-gray-800/50">
+                        <strong>说明：</strong> 本流程图已排除了导致解析失败的特殊符号，展示了本地数据库（SQLite）作为前后台解耦 the 信箱（Outbox）上报设计。即使在上游服务器（Cloud）或者本端网络瞬时中断时，本地的 `PENDING` 报告也将暂存，待网络恢复后由独立进程自动重试推送，确保数据状态100%达成最终一致性。
+                    </div>
+                </div>
+
+                <!-- 发信箱策略 -->
+                <div class="flex flex-col gap-6">
+                    <div class="glass-panel rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-2">上报信箱 (Outbox Pattern) 优势</h4>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                            为防止本地状态更新后，由于突然断网、服务器宕机或上游不可用导致的状态上报断裂，系统在 `demo.db` 中实现了两个物理发信箱表：
+                        </p>
+                        <ul class="text-xs text-gray-300 list-disc list-inside space-y-2 mb-3">
+                            <li><strong class="text-emerald-400">lead_status_reports</strong>：记录每个线索的业务中间态（如未找到用户、熔断、频控）</li>
+                            <li><strong class="text-cyan-400">friend_check_reports</strong>：记录每个加友复查事件的最终对账结果（通过/拒绝）</li>
+                        </ul>
+                        <p class="text-xs text-gray-300 leading-relaxed border-t border-gray-800 pt-3">
+                            独立的发信协程负责扫描这俩表，上报成功即标记为 `SENT`。这不仅实现了前后台服务解耦，更提供了 <strong>100% 可达的事件同步担保</strong>。
+                        </p>
+                    </div>
+
+                    <div class="glass-panel rounded-2xl p-6">
+                        <h4 class="text-base font-bold text-white mb-3">核心数据库表结构简表</h4>
+                        <div class="overflow-x-auto text-[11px] font-mono text-gray-400">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-gray-800 text-white">
+                                        <th class="py-1.5">表名</th>
+                                        <th class="py-1.5">关键字段</th>
+                                        <th class="py-1.5">说明</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="border-b border-gray-900">
+                                        <td class="py-1.5 text-cyan-400">leads</td>
+                                        <td class="py-1.5">status, phone, acceptance_attempts</td>
+                                        <td class="py-1.5">线索信息主表</td>
+                                    </tr>
+                                    <tr class="border-b border-gray-900">
+                                        <td class="py-1.5 text-cyan-400">rpa_jobs</td>
+                                        <td class="py-1.5">job_id, status, error_code, steps_json</td>
+                                        <td class="py-1.5">RPA 单次任务执行记录</td>
+                                    </tr>
+                                    <tr class="border-b border-gray-900">
+                                        <td class="py-1.5 text-cyan-400">audit_events</td>
+                                        <td class="py-1.5">event_type, result, reason_code, timestamp</td>
+                                        <td class="py-1.5">系统及业务审计日志流水</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="py-1.5 text-cyan-400">friend_check_reports</td>
+                                        <td class="py-1.5">lead_id, is_friend, status, attempts</td>
+                                        <td class="py-1.5">好友对账上报发信箱</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. 全项目闭环审计结论板块 -->
+        <section id="tab-content-audit" class="tab-content tab-hidden animate-fadeIn">
+            <!-- 统计汇总看板 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="glass-panel rounded-2xl p-6 border-l-4 border-red-500">
+                    <h4 class="text-xs uppercase tracking-wider text-red-400 font-bold mb-1">P0 严重安全与阻塞缺陷</h4>
+                    <div class="text-3xl font-bold text-white font-outfit">2 <span class="text-sm font-normal text-gray-400">项</span></div>
+                    <p class="text-[11px] text-gray-400 mt-2">包含本地 API 端口鉴权缺口及固定 8000 端口强杀冲突</p>
+                </div>
+                <div class="glass-panel rounded-2xl p-6 border-l-4 border-amber-500">
+                    <h4 class="text-xs uppercase tracking-wider text-amber-400 font-bold mb-1">P1 核心功能闭环风险</h4>
+                    <div class="text-3xl font-bold text-white font-outfit">7 <span class="text-sm font-normal text-gray-400">项</span></div>
+                    <p class="text-[11px] text-gray-400 mt-2">包含对账时序缺陷、状态机展示丢失、SSE 终态挂起等</p>
+                </div>
+                <div class="glass-panel rounded-2xl p-6 border-l-4 border-blue-500">
+                    <h4 class="text-xs uppercase tracking-wider text-blue-400 font-bold mb-1">P2 建议性功能优化</h4>
+                    <div class="text-3xl font-bold text-white font-outfit">2 <span class="text-sm font-normal text-gray-400">项</span></div>
+                    <p class="text-[11px] text-gray-400 mt-2">本地 token 安全展示限制及上游 schema 迁移等</p>
+                </div>
+            </div>
+
+            <!-- 问题细节及整改方案 -->
+            <div class="glass-panel rounded-2xl p-6 shadow-xl mb-8">
+                <h3 class="text-lg font-bold text-white mb-6">已识别的主要风险清单与闭环建议</h3>
+                
+                <div class="space-y-6">
+                    <!-- 漏洞 1 -->
+                    <div class="border-b border-gray-800 pb-4">
+                        <div class="flex items-center gap-2 mb-2 flex-wrap">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-red-500/10 text-red-400 border border-red-500/20">P0 级别</span>
+                            <span class="text-sm font-bold text-white">本地管理接口未鉴权风险 (R=83)</span>
+                        </div>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-2">
+                            <strong>现象：</strong> 前端调用上游日志 SSE 模块直接创建 EventSource 连接，请求头部不包含 Bearer Token，后端服务上相应路由亦缺乏 <code class="text-gray-400 bg-gray-900 px-1 py-0.5 rounded font-mono">require_auth</code> 校验。
+                        </p>
+                        <p class="text-xs text-gray-400 leading-relaxed bg-gray-900/40 p-2 rounded border border-gray-800">
+                            <strong>闭环建议：</strong> 将 EventSource 接口替换为带有认证头部的 Fetch 缓冲流，并在后台强制对所有 <code class="text-gray-400 font-mono">/api/v1/upstream/*</code> 节点增加鉴权依赖。
+                        </p>
+                    </div>
+
+                    <!-- 漏洞 2 -->
+                    <div class="border-b border-gray-800 pb-4">
+                        <div class="flex items-center gap-2 mb-2 flex-wrap">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-red-500/10 text-red-400 border border-red-500/20">P0 级别</span>
+                            <span class="text-sm font-bold text-white">端口绑定冲突与强杀行为 (R=78)</span>
+                        </div>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-2">
+                            <strong>现象：</strong> 桌面前端将 API 服务地址硬编码为固定 8000 端口。在打包运行环境下，Tauri 启动脚本会在初始化阶段运行 <code class="text-gray-400 bg-gray-900 px-1 py-0.5 rounded font-mono">taskkill /F</code> 直接清理可能占用该端口的第三方进程，存在重大系统级冲突。
+                        </p>
+                        <p class="text-xs text-gray-400 leading-relaxed bg-gray-900/40 p-2 rounded border border-gray-800">
+                            <strong>闭环建议：</strong> 落实动态端口分配策略，Tauri 动态拉起 Python 后提取其监听的随机端口号并注入前端的 BaseURL 变量。
+                        </p>
+                    </div>
+
+                    <!-- 漏洞 3 -->
+                    <div class="pb-4">
+                        <div class="flex items-center gap-2 mb-2 flex-wrap">
+                            <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">P1 级别</span>
+                            <span class="text-sm font-bold text-white">对账任务状态流非终态挂起</span>
+                        </div>
+                        <p class="text-xs text-gray-300 leading-relaxed mb-2">
+                            <strong>现象：</strong> RPA 加加友任务流中的 SSE 管道在执行结束并更新数据库为终态（如 FAILED/REAL_COMPLETED）后，SSE 链路仍在等待，无法完成自动连接断开，占用后台文件描述符。
+                        </p>
+                        <p class="text-xs text-gray-400 leading-relaxed bg-gray-900/40 p-2 rounded border border-gray-800">
+                            <strong>闭环建议：</strong> 前后端在确认到 `outcome_type` 写入 `success/business/system` 时应当显式发送并捕捉 `EOF`，安全终结该条 SSE 流。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 底部页脚 -->
+    <footer class="w-full text-center text-xs text-gray-500 mt-16 pt-8 border-t border-gray-950 max-w-7xl mx-auto px-6">
+        <p>© 2026 微信 RPA 桌面端独立版项目闭环审计。以 Outfit 和 Tailwind 构建。</p>
+    </footer>
+
+    <!-- 页签切换控制脚本 -->
+    <script>
+        function switchTab(tabId) {
+            // 隐藏所有板块内容
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => {
+                content.classList.add('tab-hidden');
+                content.classList.remove('tab-active', 'hidden', 'block');
+            });
+
+            // 展现目标板块
+            const targetContent = document.getElementById('tab-content-' + tabId);
+            if (targetContent) {
+                targetContent.classList.remove('tab-hidden');
+                targetContent.classList.add('tab-active');
+            }
+
+            // 移除所有导航按钮的激活高亮状态
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach(btn => {
+                btn.classList.remove('border-cyan-500', 'text-cyan-400');
+                btn.classList.add('border-transparent', 'text-gray-400');
+            });
+
+            // 为选中的导航按钮添加高亮状态
+            const activeBtn = document.getElementById('tab-btn-' + tabId);
+            if (activeBtn) {
+                activeBtn.classList.remove('border-transparent', 'text-gray-400');
+                activeBtn.classList.add('border-cyan-500', 'text-cyan-400');
+            }
+        }
+    </script>
+</body>
+</html>
