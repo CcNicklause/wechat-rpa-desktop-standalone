@@ -7,6 +7,15 @@
 # 每一次commit 需要加step
 # 每个功能需要带测试代码,你需要确保能测试通过
 
+# 任务线 + superpowers 轻量策略
+# 默认以 docs/tasks/<task-line>/ 作为项目级记忆和执行骨架；superpowers 只作为局部方法论辅助，不默认完整展开重流程
+# 优先使用任务线 state.md / flow.md 承接连续小迭代；只有新大主题或跨模块重构时才考虑完整 spec/plan 流程
+# brainstorming：用于产品方向、信息架构、取舍讨论；小迭代只借用其思路，不强制写完整 spec、提交 spec、再写 plan
+# test-driven-development：用于 bugfix、状态映射、展示文案、URL 映射等可测试规则；先补最小失败测试，再实现
+# verification-before-completion：完成前必须跑对应测试与构建/回归命令，用实际输出确认通过
+# writing-plans / finishing-a-development-branch：仅在大任务、跨模块计划、PR/合并/分支收尾时使用；普通小修不默认触发
+# 如果 superpowers 的完整流程与当前任务线轻量策略冲突，优先遵循本项目 AGENTS.md 的任务线策略
+
 # CLAUDE.md
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.

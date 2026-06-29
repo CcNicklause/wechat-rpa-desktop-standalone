@@ -1,5 +1,16 @@
 # 项目工作流约定
 
+## Project Workflow Override
+
+本仓库的协作入口以 `AGENTS.md` 为主。Claude Code 处理本项目时也应遵循 `AGENTS.md` 中的渐进式 docs 读取、任务线维护、commit step、测试验证，以及“任务线 + superpowers 轻量策略”。
+
+关键口径：
+- `docs/tasks/<task-line>/` 是项目级记忆和执行骨架。
+- superpowers 只作为局部方法论辅助，不默认完整展开重流程。
+- 连续小迭代优先更新当前任务线的 `state.md` / `flow.md` / `plan.md` / `test.md`。
+- TDD 与 completion verification 用于能产生明确收益的规则、bugfix、文案映射和完成前验证。
+- 只有新大主题、跨模块改造、显式要求完整规划或分支收尾时，才使用完整 spec/plan/finishing 流程。
+
 本项目使用多 Agent 编排开发流程。**优先使用 `/orchestrate` 命令**，不要绕过流程直接写代码或改代码。
 
 ## 启动命令
