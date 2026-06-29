@@ -213,53 +213,84 @@ class WindowsDesktopAdapter:
             time.sleep(random.uniform(*per_char_delay))
 
     def hotkey(self, *keys: str) -> None:
+        auto = self._ua()
+        ua_keys = []
+        mapping = {
+            "ctrl": "{Ctrl}",
+            "shift": "{Shift}",
+            "alt": "{Alt}",
+            "win": "{Win}",
+            "enter": "{Enter}",
+            "backspace": "{BackSpace}",
+            "delete": "{Delete}",
+        }
+        for k in keys:
+            k_lower = k.lower()
+            if k_lower in mapping:
+                ua_keys.append(mapping[k_lower])
+            else:
+                ua_keys.append(k)
+        
         try:
-            import pyautogui
-        except Exception as exc:  # pragma: no cover
-            from backend.app.core.errors import AppError
+            auto.SendKeys("".join(ua_keys), waitTime=0.15)
+        except Exception:
+            try:
+                import pyautogui
+            except Exception as exc:  # pragma: no cover
+                from backend.app.core.errors import AppError
 
-            raise AppError(
-                "KEYBOARD_DRIVER_UNAVAILABLE",
-                f"物理键盘输入依赖不可用，请安装 pyautogui: {exc}",
-            ) from exc
-        pyautogui.hotkey(*keys)
+                raise AppError(
+                    "KEYBOARD_DRIVER_UNAVAILABLE",
+                    f"物理键盘输入依赖不可用，请安装 pyautogui: {exc}",
+                ) from exc
+            pyautogui.hotkey(*keys)
 
     def paste_text(self, text: str) -> None:
+        auto = self._ua()
         try:
-            import pyautogui
-            import tkinter as tk
-        except Exception as exc:  # pragma: no cover
-            from backend.app.core.errors import AppError
+            auto.SetClipboardText(text)
+            auto.SendKeys("{Ctrl}v", waitTime=0.15)
+        except Exception:
+            try:
+                import pyautogui
+                import tkinter as tk
+            except Exception as exc:  # pragma: no cover
+                from backend.app.core.errors import AppError
 
-            raise AppError(
-                "CLIPBOARD_DRIVER_UNAVAILABLE",
-                f"剪贴板输入依赖不可用: {exc}",
-            ) from exc
+                raise AppError(
+                    "CLIPBOARD_DRIVER_UNAVAILABLE",
+                    f"剪贴板输入依赖不可用: {exc}",
+                ) from exc
 
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            root.clipboard_clear()
-            root.clipboard_append(text)
-            root.update()
-            pyautogui.hotkey("ctrl", "v")
-        finally:
-            root.destroy()
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.clipboard_clear()
+                root.clipboard_append(text)
+                root.update()
+                pyautogui.hotkey("ctrl", "v")
+            finally:
+                root.destroy()
 
     def clear_field(self) -> None:
+        auto = self._ua()
         try:
-            import pyautogui
-        except Exception as exc:  # pragma: no cover
-            from backend.app.core.errors import AppError
+            # 优先使用 uiautomation 的 SendKeys 以避免 pyautogui 组合键粘滞/卡死
+            auto.SendKeys("{Ctrl}a{BackSpace}", waitTime=0.15)
+        except Exception:
+            try:
+                import pyautogui
+            except Exception as exc:  # pragma: no cover
+                from backend.app.core.errors import AppError
 
-            raise AppError(
-                "KEYBOARD_DRIVER_UNAVAILABLE",
-                f"物理键盘输入依赖不可用，请安装 pyautogui: {exc}",
-            ) from exc
-        import time
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.15)  # 给微信 UI 线程喘息时间，零间隔连续快捷键会导致卡死
-        pyautogui.press("backspace")
+                raise AppError(
+                    "KEYBOARD_DRIVER_UNAVAILABLE",
+                    f"物理键盘输入依赖不可用，请安装 pyautogui: {exc}",
+                ) from exc
+            import time
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.15)
+            pyautogui.press("backspace")
 
 
 # ---------------------------------------------------------------------------
