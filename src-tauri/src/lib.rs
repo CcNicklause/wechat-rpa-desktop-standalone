@@ -10,6 +10,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 mod terminal;
 
+use reqwest::header::{HeaderMap, HeaderValue};
 use terminal::{MgrClient, TerminalManager};
 
 struct AppState {
@@ -78,6 +79,16 @@ fn portal_client() -> PortalResult<reqwest::Client> {
             code: "PORTAL_CLIENT_ERROR".to_string(),
             message: err.to_string(),
         })
+}
+
+fn portal_desktop_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-aisales-client", HeaderValue::from_static("desktop"));
+    headers.insert(
+        "x-aisales-session-scope",
+        HeaderValue::from_static("desktop"),
+    );
+    headers
 }
 
 fn session_path(app: &AppHandle) -> PortalResult<PathBuf> {
@@ -254,6 +265,7 @@ async fn portal_login(app: AppHandle, payload: Value, path: &str) -> PortalResul
     let client = portal_client()?;
     let response = client
         .post(format!("{}/{}", portal_api_base(), path))
+        .headers(portal_desktop_headers())
         .json(&payload)
         .send()
         .await
@@ -341,6 +353,7 @@ async fn portal_send_sms_code(phone: String) -> PortalResult<SendCodeResponse> {
     let client = portal_client()?;
     let response = client
         .post(format!("{}/sms/send-code", portal_api_base()))
+        .headers(portal_desktop_headers())
         .json(&json!({ "phone": phone, "type": "login" }))
         .send()
         .await
@@ -361,6 +374,7 @@ async fn portal_get_session(app: AppHandle) -> PortalResult<Option<PortalSession
     let client = portal_client()?;
     let response = client
         .get(format!("{}/auth/me", portal_api_base()))
+        .headers(portal_desktop_headers())
         .bearer_auth(&current.access_token)
         .send()
         .await
@@ -400,7 +414,11 @@ fn portal_logout(app: AppHandle) -> PortalResult<()> {
             let mgr_guard = manager_slot.lock().await;
             let sess_guard = session_slot.lock().await;
             match (mgr_guard.as_ref(), sess_guard.as_ref()) {
-                (Some(m), Some(s)) => (Some(Arc::clone(m)), Some(s.access_token.clone()), Some(s.user.tenant_id)),
+                (Some(m), Some(s)) => (
+                    Some(Arc::clone(m)),
+                    Some(s.access_token.clone()),
+                    Some(s.user.tenant_id),
+                ),
                 _ => (None, None, None),
             }
         };
@@ -561,11 +579,9 @@ pub fn run() {
                         let mgr = manager_slot.lock().await;
                         let sess = session_slot.lock().await;
                         match (mgr.as_ref(), sess.as_ref()) {
-                            (Some(m), Some(s)) => Some((
-                                Arc::clone(m),
-                                s.access_token.clone(),
-                                s.user.tenant_id,
-                            )),
+                            (Some(m), Some(s)) => {
+                                Some((Arc::clone(m), s.access_token.clone(), s.user.tenant_id))
+                            }
                             _ => None,
                         }
                     };
@@ -636,5 +652,23 @@ mod tests {
         assert_eq!(user.id, "u_abc");
         assert_eq!(user.user_id, "u_abc");
         assert_eq!(user.tenant_id, 100024);
+    }
+
+    #[test]
+    fn portal_requests_are_tagged_as_desktop_client() {
+        let headers = portal_desktop_headers();
+
+        assert_eq!(
+            headers
+                .get("x-aisales-client")
+                .and_then(|value| value.to_str().ok()),
+            Some("desktop")
+        );
+        assert_eq!(
+            headers
+                .get("x-aisales-session-scope")
+                .and_then(|value| value.to_str().ok()),
+            Some("desktop")
+        );
     }
 }

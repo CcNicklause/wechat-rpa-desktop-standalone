@@ -43,3 +43,10 @@
 - 已支持密码登录、短信登录、短信发送、启动恢复 session、退出登录。
 - 已保持本地 Python sidecar token 链路不变。
 - 已启动 Vite 开发服务器：`http://127.0.0.1:1420`。
+
+## 2026-06-29 追加：Web/Desktop JWT 互踢排查
+
+- 现象：桌面端登录签发新 JWT 后，Web 端登录态失效；Web 端重新登录后，桌面端 session 恢复可能 401。
+- 桌面端修复：Portal 登录、短信验证码、`/auth/me` 请求统一携带 `x-aisales-client: desktop` 与 `x-aisales-session-scope: desktop`。
+- 边界：桌面端不会主动刷新 Web JWT；如果仍互踢，需要 Portal 后端按桌面端请求头实现 Web/Desktop 会话隔离，或恢复无状态 JWT 校验。
+- 测试：`cargo test portal_requests_are_tagged_as_desktop_client` 通过。

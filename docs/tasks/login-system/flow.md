@@ -67,3 +67,27 @@ http://127.0.0.1:1420
 说明：浏览器/Vite 预览可看 UI；真实 Tauri command 登录需在 Tauri 壳中运行。
 
 STATUS: IMPLEMENTED
+
+## Cycle 2
+
+### 已落地
+
+- `src-tauri/src/lib.rs`
+  - Portal 登录、短信验证码、`/auth/me` session 恢复请求统一携带桌面端来源头：
+    - `x-aisales-client: desktop`
+    - `x-aisales-session-scope: desktop`
+  - 新增 `portal_requests_are_tagged_as_desktop_client` 单元测试，固定桌面端请求标记，便于 Portal 后端按 Web/Desktop 做会话隔离。
+
+### 对账说明
+
+- 桌面端仍只保存 Portal 返回的 `access_token`，不会主动刷新或替换 Web 端 JWT。
+- 如果 Web 登录和桌面登录仍互相踢下线，根因在 Portal 后端当前按用户维度只保留单个有效 token/session；需要 Portal 后端识别上述桌面端请求头，并按 `user + session_scope` 或真正无状态 JWT 策略允许 Web/Desktop 并行。
+
+## Cycle 2 测试覆盖
+
+```powershell
+cd src-tauri
+cargo test portal_requests_are_tagged_as_desktop_client
+```
+
+结果：通过。1 个 Rust 单元测试覆盖桌面端 Portal 请求来源头。
