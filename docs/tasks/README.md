@@ -34,6 +34,7 @@
 | `rpa-terminal-reporting` | DONE | MGR 终端 record/heartbeat/status 3 接口已接入，9/9 用例联调全过；StrictMode 双触发 bug 已修 | [state.md](rpa-terminal-reporting/state.md) |
 | `frontend-leads-board` | DONE | Cycle 1：双栏 + Drawer；Cycle 2：KPI 真实化 + DevTesting 联通；Cycle 3-6：线索展示中文化与详情抽屉用户视角收敛 | [state.md](frontend-leads-board/state.md) |
 | `desktop-runtime-hardening` | P1 IMPLEMENTED | 动态本地端口、前端动态 API base、不再强杀 8000；sidecar 退出监控与有限自动重启已落地 | [state.md](desktop-runtime-hardening/state.md) |
+| `dev-testing-panel` | CYCLE 1 DONE | 开发测试页页面级能力维护；Cycle 1：一键清空本地数据（二次确认，保留上游配置）已落地 | [state.md](dev-testing-panel/state.md) |
 
 ## 可选任务线示例
 

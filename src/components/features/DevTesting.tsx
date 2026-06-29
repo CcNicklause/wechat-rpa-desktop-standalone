@@ -124,6 +124,7 @@ export function DevTesting() {
   const [manualFriendAccount, setManualFriendAccount] = useState('');
   const [manualFriendName, setManualFriendName] = useState('');
   const [manualSimulating, setManualSimulating] = useState(false);
+  const [wipingData, setWipingData] = useState(false);
 
   const updateBatchRow = (index: number, patch: Partial<BatchLeadRow>) => {
     setBatchRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -354,6 +355,56 @@ export function DevTesting() {
     }
   };
 
+  const wipeAllData = async () => {
+    // 二次确认（危险操作）：第一轮说明范围与不可逆性，第二轮要求显式输入确认口令。
+    const first = window.confirm(
+      '⚠️ 危险操作：即将清空本地全部业务数据\n\n' +
+        '清理范围：线索 / RPA 任务 / 审计事件 / 好友对账 / 加微结果上报 / 每日计数。\n' +
+        '保留：上游配置（upstream_config）等配置，清空后仍可直接使用。\n\n' +
+        '此操作不可恢复，且会同步清空调度器内存队列。是否继续？',
+    );
+    if (!first) {
+      toast({ title: '已取消', description: '未清空本地数据', variant: 'default' });
+      return;
+    }
+    const second = window.prompt('确认清空请输入：清空');
+    if (second !== '清空') {
+      toast({ title: '已取消', description: '确认口令不匹配，未清空本地数据', variant: 'default' });
+      return;
+    }
+
+    setWipingData(true);
+    try {
+      const res = await requestLocalApi<{ status: string; counts: Record<string, number>; queue_cleared: boolean }>(
+        '/api/v1/upstream/dev/wipe-data',
+        { method: 'POST' },
+      );
+      const total = Object.values(res.counts ?? {}).reduce((acc, n) => acc + (n || 0), 0);
+      toast({
+        title: '已清空本地业务数据',
+        description: `共删除 ${total} 条记录，队列已${res.queue_cleared ? '清空' : '跳过'}（上游配置已保留）`,
+        variant: 'success',
+      });
+      // 清空 DevTest store 里残留的 job/表单快照，避免 UI 还指向已不存在的 job
+      clearJobInStore();
+      queryClient.invalidateQueries({ queryKey: ['dev-test-leads'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-friend-check-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['dev-test-audit', testLeadId] });
+    } catch (err: any) {
+      const message = err?.message || '';
+      const isNetworkDown =
+        err instanceof TypeError ||
+        /Failed to fetch|NetworkError|ECONNREFUSED|Connection refused/i.test(message);
+      toast({
+        title: isNetworkDown ? '无法连接本地后端' : '清空本地数据失败',
+        description: message || '请确认本地后端已启动',
+        variant: 'destructive',
+      });
+    } finally {
+      setWipingData(false);
+    }
+  };
+
   const simulateManualFriendAccepted = async (flushAfter: boolean) => {
     const account = manualFriendAccount.trim();
     if (account.length < 5) {
@@ -504,6 +555,27 @@ export function DevTesting() {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
+      <Card className="p-4 shadow-sm border border-destructive/40 bg-destructive/5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <h3 className="font-semibold text-xs text-destructive tracking-wider">🧹 一键清空本地数据（危险操作）</h3>
+            <p className="text-[11px] text-muted-foreground">
+              清空线索 / RPA 任务 / 审计 / 好友对账 / 加微上报 / 每日计数，保留上游配置。可清掉僵尸中间态残留（如 CALLING/RPA_SIMULATED）及全部业务数据回到干净态，但不可恢复，需二次确认。
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={wipingData}
+            onClick={wipeAllData}
+            className="shrink-0"
+          >
+            {wipingData ? '清空中…' : '⚠️ 一键清空本地数据'}
+          </Button>
+        </div>
+      </Card>
+
       <Card className="p-6 shadow-sm border border-border bg-card">
         <CardHeader className="p-0 pb-4 border-b border-border mb-4">
           <CardTitle>批量线索模拟（走真实上游链路）</CardTitle>

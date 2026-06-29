@@ -59,7 +59,7 @@ export function KpiStrip({ leads, stats, className }: KpiStripProps) {
           <div className="space-y-1">
             <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">执行中</p>
             <h3 className="text-2xl font-bold text-blue-600 dark:text-blue-500">{running}</h3>
-            <p className="text-[9px] text-muted-foreground">客户端引擎正在操作的队列数</p>
+            <p className="text-[9px] text-muted-foreground">排队待执行 + 引擎执行中</p>
           </div>
           <div className="p-2.5 bg-blue-500/10 text-blue-600 rounded-xl">
             <RefreshCw className="h-5 w-5 animate-spin" style={{ animationDuration: '3s' }} />

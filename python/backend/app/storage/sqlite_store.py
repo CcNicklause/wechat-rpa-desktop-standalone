@@ -223,6 +223,27 @@ class SQLiteStore:
             ).fetchone()
         return int(row['count'] if row else 0)
 
+    def wipe_business_data(self) -> dict[str, int]:
+        """清空全部业务数据，保留 upstream_config 等配置。
+
+        供开发测试页"一键清空数据"使用——属于不可恢复的危险操作，调用方需自行做二次确认。
+        表名为硬编码白名单，避免外部输入拼到 SQL 里。
+        """
+        tables = (
+            "leads",
+            "rpa_jobs",
+            "audit_events",
+            "friend_check_reports",
+            "lead_status_reports",
+            "daily_counters",
+        )
+        counts: dict[str, int] = {}
+        with self._lock, self._connect() as conn:
+            for table in tables:
+                cursor = conn.execute(f"DELETE FROM {table}")
+                counts[table] = int(cursor.rowcount or 0)
+        return counts
+
     def create_job(self, job: dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
