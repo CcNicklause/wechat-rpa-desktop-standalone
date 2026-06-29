@@ -75,13 +75,13 @@ class LeadStatsResponse(BaseModel):
         full_by_status: dict[str, int] = {status: by_status.get(status, 0) for status in LeadStatus}
         total = sum(full_by_status.values())
         success = full_by_status[LeadStatus.WECHAT_ACCEPTED]
+        # 「执行中」= 引擎链路活跃：排队待执行 + 引擎执行中。
+        # 不含 CALLING/INTENT_CONFIRMED（销售人工阶段）、RPA_SIMULATED（模拟完成，无真实发送）、
+        # WECHAT_ADD_REQUESTED（已发申请待对方通过，引擎已操作完）——这些是中间态/已完成态，
+        # 计入会让"执行中"虚高（实测曾把 6~13 天前的 CALLING/RPA_SIMULATED 残留误报为执行中）。
         running = sum(full_by_status[s] for s in [
-            LeadStatus.CALLING,
-            LeadStatus.INTENT_CONFIRMED,
             LeadStatus.RPA_PENDING_APPROVAL,
-            LeadStatus.RPA_SIMULATED,
             LeadStatus.RPA_EXECUTING,
-            LeadStatus.WECHAT_ADD_REQUESTED,
         ])
         failure = sum(full_by_status[s] for s in [
             LeadStatus.RPA_FAILED,

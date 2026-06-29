@@ -146,8 +146,8 @@ def test_all_statuses_once():
         assert data["total"] == 15
         # Check success: only WECHAT_ACCEPTED
         assert data["success"] == 1
-        # Check running: 6 states (CALLING, INTENT_CONFIRMED, RPA_PENDING_APPROVAL, RPA_SIMULATED, RPA_EXECUTING, WECHAT_ADD_REQUESTED)
-        assert data["running"] == 6
+        # Check running: 2 states (RPA_PENDING_APPROVAL, RPA_EXECUTING) — 引擎链路活跃口径
+        assert data["running"] == 2
         # Check failure: 6 states
         assert data["failure"] == 6
         # Check each status appears exactly once

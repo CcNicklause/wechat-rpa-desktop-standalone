@@ -114,6 +114,23 @@ def clear_queue(scheduler=Depends(get_scheduler)):
     return {"status": "cleared"}
 
 
+@router.post("/dev/wipe-data")
+def dev_wipe_data(
+    store: SQLiteStore = Depends(get_store),
+    scheduler=Depends(get_scheduler),
+):
+    """开发用：一键清空本地业务数据（保留 upstream_config 等配置）。
+
+    同步清空调度器内存队列与去重位，避免清空后仍有幽灵任务在跑。
+    属于不可恢复的危险操作，前端必须二次确认后再调用。
+    """
+    counts = store.wipe_business_data()
+    if scheduler:
+        scheduler.clear_queue()
+    log_broadcaster.log("⚠️ 开发测试页触发一键清空本地业务数据（上游配置已保留）")
+    return {"status": "cleared", "counts": counts, "queue_cleared": bool(scheduler)}
+
+
 @router.get("/dev/friend-check-reports")
 def get_friend_check_reports(
     limit: int = 100,

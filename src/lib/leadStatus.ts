@@ -24,13 +24,12 @@ export type LeadStatus = (typeof LEAD_STATUS)[keyof typeof LEAD_STATUS];
 /** 状态分组（与后端 stats 返回对齐） */
 export const LEAD_STATUS_GROUPS = {
   SUCCESS: new Set([LEAD_STATUS.WECHAT_ACCEPTED]),
+  // 「执行中」= 引擎链路活跃：排队待执行 + 引擎执行中。
+  // 不含 CALLING/INTENT_CONFIRMED（销售人工阶段）、RPA_SIMULATED（模拟完成）、
+  // WECHAT_ADD_REQUESTED（已发申请待对方通过）——这些中间态不计入执行中。
   RUNNING: new Set([
-    LEAD_STATUS.CALLING,
-    LEAD_STATUS.INTENT_CONFIRMED,
     LEAD_STATUS.RPA_PENDING_APPROVAL,
-    LEAD_STATUS.RPA_SIMULATED,
     LEAD_STATUS.RPA_EXECUTING,
-    LEAD_STATUS.WECHAT_ADD_REQUESTED,
   ]),
   FAILURE: new Set([
     LEAD_STATUS.RPA_FAILED,

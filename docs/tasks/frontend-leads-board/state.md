@@ -80,6 +80,39 @@ STATUS: CONVERGED
 
 ---
 
+## Cycle 9 · 节点状态（KPI「执行中」口径收窄）
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|-----|------|-----|-----|
+| C9-0 | 根因核实 | DONE | demo.db 查询 | 推翻"running 孤儿"误判：实测 `RPA_EXECUTING`=0、running job=0；"19 个执行中"= running 桶把 CALLING(11)+RPA_SIMULATED(8) 僵尸中间态算入 |
+| C9-1 | 口径确认 | DONE | 对话 | 「执行中」= 引擎链路活跃：`RPA_PENDING_APPROVAL` + `RPA_EXECUTING` |
+| C9-2 | 实施 | DONE | lead.py / leadStatus.ts / KpiStrip.tsx / test_lead_stats.py | 后端口径收窄 + 前端镜像同步 + 副标题文案 + 测试断言同步 |
+| C9-3 | 验证 | DONE | pytest + tsc | 109 passed；tsc 无报错 |
+
+### Cycle 9 范围
+
+- ✅ 后端 `LeadStatsResponse.make` 的 running 桶从 6 态（CALLING/INTENT_CONFIRMED/RPA_PENDING_APPROVAL/RPA_SIMULATED/RPA_EXECUTING/WECHAT_ADD_REQUESTED）收窄为 2 态（`RPA_PENDING_APPROVAL` + `RPA_EXECUTING`）。
+- ✅ 前端 `LEAD_STATUS_GROUPS.RUNNING`（`src/lib/leadStatus.ts`）镜像同步，保持与后端 stats 对齐。
+- ✅ `KpiStrip`「执行中」副标题由"客户端引擎正在操作的队列数"改为"排队待执行 + 引擎执行中"，与口径一致。
+- ✅ `test_lead_stats.py::test_all_statuses_once` running 断言 6→2 并更新注释。
+- ✅ 被移出 running 的状态（CALLING/INTENT_CONFIRMED/RPA_SIMULATED/WECHAT_ADD_REQUESTED）仍计入「线索总数」与成功率分母，但不再误报为执行中。
+
+### Cycle 9 验证
+
+```powershell
+cd python; $env:PYTHONPATH='.'; uv run pytest backend/app/tests -q
+```
+结果：✅ 109 passed, 4 warnings
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：✅ 无报错
+
+STATUS: CONVERGED
+
+---
+
 ## Cycle 8 · 节点状态（小窗口抽屉布局修复）
 
 | # | 节点 | 状态 | 产物 | 备注 |
