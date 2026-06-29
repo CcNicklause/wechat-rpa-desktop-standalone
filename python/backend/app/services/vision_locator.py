@@ -199,6 +199,12 @@ def fuzzy_text_hit(
             clean_kw = _strip_spaces(kw).lower()
             if not clean_kw:
                 continue
+            # 长度守卫：partial_ratio 会将较短串滑过较长串做最优对齐。
+            # 当 OCR 文本远短于关键词时（如"搜索"2字 vs "搜索结果为空"6字），
+            # 它回答的是"OCR文本是否出现在关键词里"——方向反了，极易假阳性。
+            # 要求 OCR 文本至少达到关键词长度的 50%，才允许模糊匹配。
+            if len(clean_text) < len(clean_kw) * 0.5:
+                continue
             score = fuzz.partial_ratio(clean_kw, clean_text)
             if score > best_score:
                 best_score = score

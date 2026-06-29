@@ -707,5 +707,80 @@ class TestVisionLocatorPendingCache(unittest.TestCase):
         self.assertEqual(len(locator.pending_cache), 0)
 
 
+class TestFuzzyTextHit(unittest.TestCase):
+    """fuzzy_text_hit 的单元测试，重点覆盖 partial_ratio 短文本假阳性。"""
+
+    def setUp(self):
+        from backend.app.services.vision_locator import fuzzy_text_hit
+        self.fuzzy_text_hit = fuzzy_text_hit
+
+    # ---- 子串精确匹配（不依赖 rapidfuzz） ----
+
+    def test_exact_substring_hit(self):
+        """关键词是 OCR 文本的子串时应命中。"""
+        result = self.fuzzy_text_hit("该用户不存在，请检查", ["该用户不存在"])
+        self.assertEqual(result, "该用户不存在")
+
+    def test_exact_substring_miss(self):
+        """OCR 文本完全不含关键词时应返回 None。"""
+        result = self.fuzzy_text_hit("添加到通讯录", ["该用户不存在", "搜索结果为空"])
+        self.assertIsNone(result)
+
+    # ---- partial_ratio 短文本假阳性回归测试 ----
+
+    def test_short_ocr_word_should_not_match_long_keyword(self):
+        """回归: OCR 词"搜索"不应匹配"搜索结果为空"或"你搜索的账号不存在"。
+
+        这是 job_b5810110bdcb 的真实 bug：搜索按钮文字被 partial_ratio
+        反向匹配到 TARGET_NOT_FOUND 关键词，导致已搜到的用户被判为未找到。
+        """
+        keywords = [
+            "搜索结果为空",
+            "你搜索的账号不存在",
+            "该用户不存在",
+            "未找到相关结果",
+        ]
+        result = self.fuzzy_text_hit("搜索", keywords)
+        self.assertIsNone(result, "短 OCR 词'搜索'不应匹配到任何 TARGET_NOT_FOUND 关键词")
+
+    def test_short_ocr_word_add_friends_no_false_positive(self):
+        """OCR 词"朋友"不应匹配"添加朋友"等长关键词（通过 partial_ratio）。"""
+        # "朋友" 长度 2，"添加朋友" 长度 4，比例 0.5 刚好在边界
+        # 但真正有意义的匹配应该是子串命中，不是 partial_ratio
+        keywords = ["添加朋友验证申请", "发送朋友验证"]
+        result = self.fuzzy_text_hit("朋友", keywords)
+        self.assertIsNone(result)
+
+    # ---- partial_ratio 正常模糊匹配（OCR 拼错容错） ----
+
+    def test_fuzzy_match_ocr_typo(self):
+        """OCR 小幅拼错时 partial_ratio 应正常命中。"""
+        # "添加到涌讯录" 是 OCR 把"通"识别为"涌"的真实案例
+        result = self.fuzzy_text_hit("添加到涌讯录", ["添加到通讯录"])
+        # 5/5 字，只差一个字，partial_ratio 应 >= 80
+        self.assertEqual(result, "添加到通讯录")
+
+    def test_fuzzy_match_with_similar_length(self):
+        """长度相近时 partial_ratio 应正常工作。"""
+        result = self.fuzzy_text_hit("搜索结果为空", ["搜索结果为空"])
+        self.assertEqual(result, "搜索结果为空")
+
+    def test_fuzzy_match_exact_keyword_in_longer_text(self):
+        """关键词完整出现在较长 OCR 文本中时应命中。"""
+        result = self.fuzzy_text_hit(
+            "该用户不存在请检查你填写的账号是否正确",
+            ["该用户不存在"],
+        )
+        self.assertEqual(result, "该用户不存在")
+
+    # ---- 空格不敏感 ----
+
+    def test_spaces_ignored(self):
+        """OCR 文本中的空格应被忽略。"""
+        result = self.fuzzy_text_hit("该 用 户 不 存 在", ["该用户不存在"])
+        self.assertEqual(result, "该用户不存在")
+
+
 if __name__ == '__main__':
     unittest.main()
+
