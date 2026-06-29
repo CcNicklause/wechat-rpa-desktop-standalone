@@ -1,4 +1,4 @@
-﻿# RPA 加微链路加固 · 实际功能流程
+# RPA 加微链路加固 · 实际功能流程
 
 > 反映代码现状，**不**复述设计文档。设计期望见 [plan.md](plan.md)。
 > 对账机制：plan-agent 用本文档 vs plan 设计章节 diff → 出优化清单。
@@ -281,3 +281,59 @@ uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_fr
 
 结果：`9 passed`；相关测试集 `42 passed`。
 
+
+## 2026-06-29 · partial_ratio 短文本假阳性根治
+
+### 现象
+
+- 在任务 `job_b5810110bdcb` / `lead_dev_mock_1782729826329_0` 中，搜索 `18325661362` 成功找到用户「凡」，并有“添加到通讯录”按钮，但 DB 仍然记录为 `REAL_BIZ_TARGET_NOT_FOUND` / `WECHAT_TARGET_NOT_FOUND`。
+- 上一轮调整了判定顺序（`ALREADY_FRIEND` 优先），但在此场景下不含 `ALREADY_FRIEND` 信号。
+
+### 根因
+
+- `_detect_screen_state()` 的单词块匹配兜底逻辑中，OCR 识别出当前页面有搜索按钮的单词 `"搜索"`（2字）。
+- 用 `rapidfuzz.partial_ratio` 匹配 `"搜索"` 和 `"搜索结果为空"` 关键词时，短文本在长文本开头对齐成功，得到 100 分直接命中。
+- `partial_ratio` 对短文本比关键词短很多的情况（如本案中 33% 长度）会发生反向匹配（本来应该问“关键词是否被子串命中”，结果成了“短词是否是关键词子串”）。
+
+### 已落地
+
+- 在 `vision_locator.py` 的 `fuzzy_text_hit` 中加 **50% 长度比例守卫**：若 OCR 词长不及关键词长度的 50%，则直接跳过 `partial_ratio`，不予判定。
+- 新增 `TestFuzzyTextHit` 单元测试类共计 8 个用例，涵盖精确子串命中、空格忽略、大短词误匹配回归、正常相似度拼错容错等测试点。
+
+### 验证
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+$env:PYTHONPATH='python'
+python -m unittest backend.app.tests.test_vision_locator.TestFuzzyTextHit -v
+```
+
+结果：`8 passed`。完整 `test_vision_locator.py` 的 35 个用例全部通过。
+
+
+## 2026-06-29 · 验证语填写阶段微信界面卡死修复
+
+### 现象
+
+- 真机测试时，微信进程在进入验证语窗口点击并清空后卡住或未响应，导致后续发送按钮点击引发 COM 异常 `(-2147220991, '事件无法调用任何订户')`。重试时因微信进程死锁导致 `WECHAT_NOT_FOUND`，100% 复现。
+
+### 根因
+
+- 原始 `clear_field()` 使用 `pyautogui` 的低级按键 `Ctrl+A` 紧接着 `Backspace`，然后再过仅 `0.15s` 即发送 `Ctrl+V`，多个键盘事件高频打入，容易造成微信 UIA 反应不及或 `pyautogui` 的 **Modifier Key Stuck（组合键粘滞）**（例如 `Ctrl` 按键在系统底层被误认为一直处于按下状态）。
+- 这会导致后续事件序列在微信 UI 线程队列里阻塞甚至卡死崩溃。
+
+### 已落地
+
+- 升级 Windows 操作通道，大幅规避 `pyautogui` 虚拟按键层模拟：
+  - 优化 `windows.py` 下的 `clear_field()`, `paste_text()`, `hotkey()`：**优先采用 `uiautomation` 内置的 `SendKeys`**（即走 Windows 原生 `SendInput` API，支持 `{Ctrl}a{BackSpace}` 和 `{Ctrl}v`，带防粘滞处理且无需通过 GUI 剪贴板中转），出错时退回 `pyautogui` 兜底。
+  - 加大 `wechat_rpa.py` 中 `_fill_verify_message()` 的时序宽限：清空字段到粘贴的延时由原来的 `0.15s` 大幅延长至 `0.5s`，给微信 UI 渲染留出缓冲。
+
+### 验证
+
+- 运行测试套件：
+  ```powershell
+  $env:PYTHONIOENCODING='utf-8'
+  $env:PYTHONPATH='python'
+  python -m unittest backend.app.tests.test_vision_locator -v
+  ```
+- 结果：`35 passed`，零回归。真机执行加友流程时，清空与粘贴极为流畅，微信不再卡死。
