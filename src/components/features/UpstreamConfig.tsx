@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/common/StatusBadge';
-import { LOCAL_API_BASE } from '@/lib/api';
+import { getLocalApiBase } from '@/lib/api';
 
 export function UpstreamConfig() {
   const {
@@ -27,12 +27,18 @@ export function UpstreamConfig() {
 
   // 2. 初始化监听 SSE 日志流
   useEffect(() => {
-    const eventSource = new EventSource(`${LOCAL_API_BASE}/api/v1/upstream/logs`);
-    eventSource.onmessage = (event) => {
-      addLog(event.data);
-    };
+    let eventSource: EventSource | null = null;
+    let cancelled = false;
+    void getLocalApiBase().then((apiBase) => {
+      if (cancelled) return;
+      eventSource = new EventSource(`${apiBase}/api/v1/upstream/logs`);
+      eventSource.onmessage = (event) => {
+        addLog(event.data);
+      };
+    });
     return () => {
-      eventSource.close();
+      cancelled = true;
+      eventSource?.close();
     };
   }, []);
 

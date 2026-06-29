@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getLocalApiToken, LOCAL_API_BASE, requestLocalApi } from '@/lib/api';
+import { getLocalApiBase, getLocalApiToken, requestLocalApi } from '@/lib/api';
 import { useLeadJobsStore, selectSnapshot } from './useLeadJobs';
 import type { JobSnapshot } from '@/stores/useDevTestStore';
 
@@ -78,8 +78,9 @@ export function useJobSnapshot(
       (async () => {
         try {
           const token = await getLocalApiToken();
+          const apiBase = await getLocalApiBase();
           const response = await fetch(
-            `${LOCAL_API_BASE}/api/v1/rpa/jobs/${jobId}/events`,
+            `${apiBase}/api/v1/rpa/jobs/${jobId}/events`,
             {
               method: 'GET',
               headers: {

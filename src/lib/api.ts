@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 let cachedToken: string | null = null;
+let cachedApiBase: string | null = null;
 
 async function getLocalToken(): Promise<string> {
   if (cachedToken) return cachedToken;
@@ -22,20 +23,33 @@ export async function getLocalApiToken(): Promise<string> {
   return getLocalToken();
 }
 
-export const LOCAL_API_BASE = "http://127.0.0.1:8000";
+export async function getLocalApiBase(): Promise<string> {
+  if (cachedApiBase) return cachedApiBase;
+  if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+    try {
+      cachedApiBase = await invoke<string>("get_local_api_base");
+      return cachedApiBase;
+    } catch (err) {
+      console.warn("Using fallback local API base 'http://127.0.0.1:8000'", err);
+    }
+  }
+  cachedApiBase = "http://127.0.0.1:8000";
+  return cachedApiBase;
+}
 
 export async function requestLocalApi<T = any>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
   const token = await getLocalToken();
+  const apiBase = await getLocalApiBase();
   const headers = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
     ...options.headers,
   };
 
-  const response = await fetch(`${LOCAL_API_BASE}${path}`, {
+  const response = await fetch(`${apiBase}${path}`, {
     ...options,
     headers,
   });

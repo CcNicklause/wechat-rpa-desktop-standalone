@@ -489,7 +489,7 @@ export function DevTesting() {
       if (isNetworkDown) {
         toast({
           title: '无法连接本地后端',
-          description: '127.0.0.1:8000 未响应，请确认 Python 后端已启动 (pnpm tauri dev 或手动 uvicorn)。',
+          description: '本地 Python 后端未响应，请确认桌面端已启动并完成 RPA 引擎初始化。',
           variant: 'destructive',
         });
       } else {

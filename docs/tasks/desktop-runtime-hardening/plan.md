@@ -1,7 +1,7 @@
 # 桌面运行时加固 · 计划
 
 > 任务线：`desktop-runtime-hardening`
-> 状态：DRAFT
+> 状态：P0 IMPLEMENTED
 
 ## 第一部分 · 问题背景
 
@@ -43,8 +43,10 @@
 
 推荐方案 C，分两步落地：
 
-1. P0：动态端口 + 前端动态 API base + 不再强杀 8000。
-2. P1：sidecar 日志落盘 + 退出监控 + 有限自动重启 + UI 运行态展示。
+1. P0：动态端口 + 前端动态 API base + 不再强杀 8000。（本轮已落地）
+2. P1：sidecar 退出监控 + 有限自动重启 + UI 运行态展示。（后续）
+
+本轮额外落地：sidecar stdout/stderr 日志落盘到 app data 目录，便于生产排查。
 
 ## 第四部分 · 初步测试清单
 
@@ -56,5 +58,12 @@
 | 1.4 | sidecar 中途退出可观测 | 启动后杀 Python child | 前端轮询状态 | UI 显示重启中或失败，而非静默断开 |
 | 1.5 | sidecar 自动重启 | 杀 Python child | Tauri supervisor 检测退出 | 新 child 启动，health 恢复 |
 
-STATUS: DRAFT
+## 第五部分 · P0 对账与后续
 
+| 优先级 | 项目 | 原因 | 建议处理 |
+|---|---|---|---|
+| P1 | sidecar 自动重启 | 当前已避免固定端口冲突，但 child 中途退出仍需用户重启 app | 增加 supervisor loop、重启次数上限、状态 command |
+| P1 | UI 展示启动中/重启中/失败 | 当前状态栏只通过 health 成败显示连接状态 | 增加 sidecar runtime status command |
+| P2 | 生产打包 sidecar 形态 | 当前 dev 路径仍调用 `uv run uvicorn` | 打包阶段改为内置 sidecar 可执行文件或稳定 Python runtime |
+
+STATUS: P0 IMPLEMENTED

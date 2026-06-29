@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
@@ -16,6 +17,7 @@ use terminal::{MgrClient, TerminalManager};
 struct AppState {
     token: String,
     python_process: Mutex<Option<Child>>,
+    local_api_base: String,
     /// 当前活跃的 Portal session 副本，供 terminal 模块与 logout 路径读取。
     /// 仅在登录成功 / session 恢复时写入；logout 清空。
     portal_session: Arc<AsyncMutex<Option<PortalSession>>>,
@@ -89,6 +91,36 @@ fn portal_desktop_headers() -> HeaderMap {
         HeaderValue::from_static("desktop"),
     );
     headers
+}
+
+fn local_api_base(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn reserve_local_api_port() -> std::io::Result<(u16, TcpListener)> {
+    for port in 18100..=18199 {
+        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+            return Ok((port, listener));
+        }
+    }
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    Ok((port, listener))
+}
+
+fn uvicorn_args(port: u16) -> Vec<String> {
+    [
+        "run",
+        "uvicorn",
+        "backend.app.main:app",
+        "--port",
+        &port.to_string(),
+        "--host",
+        "127.0.0.1",
+    ]
+    .into_iter()
+    .map(ToOwned::to_owned)
+    .collect()
 }
 
 fn session_path(app: &AppHandle) -> PortalResult<PathBuf> {
@@ -284,40 +316,14 @@ async fn portal_login(app: AppHandle, payload: Value, path: &str) -> PortalResul
     Ok(session)
 }
 
-#[cfg(target_os = "windows")]
-fn kill_existing_backend_on_port(port: u16) {
-    let output = Command::new("netstat").args(["-ano", "-p", "tcp"]).output();
-    let Ok(output) = output else {
-        return;
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut pids = std::collections::HashSet::new();
-    let port_suffix = format!(":{port}");
-
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 5 {
-            continue;
-        }
-        let local_addr = parts[1];
-        let state = parts[3];
-        let pid = parts[4];
-        if state == "LISTENING" && local_addr.ends_with(&port_suffix) {
-            pids.insert(pid.to_string());
-        }
-    }
-
-    for pid in pids {
-        let _ = Command::new("taskkill").args(["/PID", &pid, "/F"]).output();
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn kill_existing_backend_on_port(_port: u16) {}
-
 #[tauri::command]
 fn get_security_token(state: State<'_, AppState>) -> String {
     state.token.clone()
+}
+
+#[tauri::command]
+fn get_local_api_base(state: State<'_, AppState>) -> String {
+    state.local_api_base.clone()
 }
 
 #[tauri::command]
@@ -504,11 +510,15 @@ pub fn run() {
         uuid::Uuid::new_v4().to_string().replace("-", "")
     );
     let token_clone = security_token.clone();
+    let (local_api_port, local_api_listener) =
+        reserve_local_api_port().expect("failed to reserve local API port");
+    let api_base = local_api_base(local_api_port);
 
     tauri::Builder::default()
         .manage(AppState {
             token: security_token,
             python_process: Mutex::new(None),
+            local_api_base: api_base.clone(),
             portal_session: Arc::new(AsyncMutex::new(None)),
             terminal_manager: Arc::new(AsyncMutex::new(None)),
         })
@@ -544,22 +554,35 @@ pub fn run() {
                 python_dir
             };
             println!("[DIAGNOSTIC] final_dir resolved to = {:?}", final_dir);
+            println!("[DIAGNOSTIC] local_api_base = {}", api_base);
 
             // Spin up Python development server natively in the background
-            kill_existing_backend_on_port(8000);
+            drop(local_api_listener);
             let mut cmd = Command::new("uv");
-            cmd.args(&[
-                "run",
-                "uvicorn",
-                "backend.app.main:app",
-                "--port",
-                "8000",
-                "--host",
-                "127.0.0.1",
-            ]);
+            cmd.args(uvicorn_args(local_api_port));
             cmd.current_dir(&final_dir);
             cmd.env("LOCAL_SECURITY_TOKEN", &token_clone);
             cmd.env("PYTHONPATH", &final_dir);
+            let log_dir = app.path().app_data_dir().unwrap_or_else(|_| final_dir.clone());
+            let _ = fs::create_dir_all(&log_dir);
+            if let Ok(file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_dir.join("sidecar-stdout.log"))
+            {
+                cmd.stdout(Stdio::from(file));
+            } else {
+                cmd.stdout(Stdio::null());
+            }
+            if let Ok(file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_dir.join("sidecar-stderr.log"))
+            {
+                cmd.stderr(Stdio::from(file));
+            } else {
+                cmd.stderr(Stdio::null());
+            }
 
             let child = cmd.spawn().expect("failed to start Python sidecar backend");
 
@@ -604,6 +627,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_security_token,
+            get_local_api_base,
             portal_login_password,
             portal_login_sms,
             portal_send_sms_code,
@@ -670,5 +694,19 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("desktop")
         );
+    }
+
+    #[test]
+    fn local_api_base_uses_selected_port() {
+        assert_eq!(local_api_base(18123), "http://127.0.0.1:18123");
+    }
+
+    #[test]
+    fn uvicorn_args_use_selected_port() {
+        let args = uvicorn_args(18124);
+
+        assert!(args.windows(2).any(|pair| pair == ["--port", "18124"]));
+        assert!(args.windows(2).any(|pair| pair == ["--host", "127.0.0.1"]));
+        assert!(args.iter().any(|arg| arg == "backend.app.main:app"));
     }
 }
