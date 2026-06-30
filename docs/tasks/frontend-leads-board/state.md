@@ -119,6 +119,169 @@ pnpm -s build
 
 ---
 
+## Cycle 13 - 侧边栏身份区与退出防误触
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C13-0 | 体验确认 | DONE | `Sidebar.tsx` | 顶部品牌位改为用户昵称，移除侧栏固定 WeChat RPA 文案 |
+| C13-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 锁定侧栏宽度、用户身份展示、退出二次确认 |
+| C13-2 | 实施 | DONE | `Sidebar.tsx` | 侧栏 `w-64` 收窄为 `w-56`；退出改为底部 ghost 图标 |
+| C13-3 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 13 范围
+
+- 侧边栏顶部使用当前登录用户昵称作为主标题，角色与“微信助手”作为辅助信息。
+- 移除侧边栏头部固定 `WeChat RPA` 品牌文案，避免与用户昵称位置冲突。
+- 侧边栏宽度从 `w-64` 收窄为 `w-56`，整体 padding 从 `p-6` 收紧为 `p-4`。
+- “安全退出”从整宽醒目按钮改为底部右侧 `LogOut` 图标按钮。
+- 首次点击退出图标只弹 toast；4 秒内再次点击同一图标才真正执行 `logout()`。
+
+### Cycle 13 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
+## Cycle 14 - 侧边栏 shadcn 交互收敛
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C14-0 | 体验确认 | DONE | `Sidebar.tsx` | 侧栏继续收窄，用户区显示昵称和手机号两行 |
+| C14-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 先断言 Tooltip/Dialog、宽度、两行身份与开发规范 |
+| C14-2 | 实施 | DONE | `dialog.tsx` / `tooltip.tsx` / `Sidebar.tsx` | 新增 shadcn 风格 Tooltip/Dialog，退出用 Dialog 二次确认 |
+| C14-3 | 规范沉淀 | DONE | `docs/development-guidelines.md` | 前端交互组件优先使用 shadcn/Radix；缺失时先补 ui 封装 |
+| C14-4 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 14 范围
+
+- 侧边栏宽度从 `w-56` 继续收窄为 `w-52`。
+- 用户区改为头像 + 昵称 + 手机号两行展示，并保留角色与“微信助手”辅助信息。
+- 退出入口移动到用户区右侧，避免底部单独图标造成左侧大块空白。
+- 退出按钮悬浮提示改为 shadcn/Radix `Tooltip`。
+- 二次确认从 toast 改为 shadcn/Radix `Dialog`，确认按钮才执行 `logout()`。
+- 开发规范增加：前端交互组件优先 shadcn/Radix，代码库缺组件时先补 `src/components/ui/` 封装。
+
+### Cycle 14 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
+## Cycle 15 - 侧边栏退出位置再收敛
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C15-0 | 体验确认 | DONE | `Sidebar.tsx` | 顶部退出按钮突兀，身份区只保留身份识别 |
+| C15-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 断言退出 Dialog 必须位于导航之后的底部操作区 |
+| C15-2 | 实施 | DONE | `Sidebar.tsx` | 退出按钮移到底部细分隔区，保留 Tooltip/Dialog |
+| C15-3 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 15 范围
+
+- 从顶部用户身份区移除退出按钮，避免视觉上抢占用户身份区域。
+- 新增底部 `mt-auto` 操作区，用细分隔线与导航分开。
+- 退出按钮继续使用右对齐小图标、shadcn/Radix `Tooltip` 与 `Dialog` 二次确认。
+
+### Cycle 15 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
+## Cycle 16 - 侧边栏品牌区与账号操作条重排
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C16-0 | 体验确认 | DONE | `Sidebar.tsx` | 顶部改为“微信助手”产品身份；账号信息下沉到底部 |
+| C16-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 断言顶部品牌文案、底部用户 icon、昵称手机号与退出按钮布局 |
+| C16-2 | 实施 | DONE | `Sidebar.tsx` | 顶部 Bot 图标 + “微信助手”；底部用户 icon + 昵称手机号 + 退出 |
+| C16-3 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 16 范围
+
+- 顶部从当前账号信息改为产品身份：`Bot` 图标 + 大字“微信助手”。
+- 当前账号昵称与手机号移动到底部退出按钮左侧。
+- 底部账号操作条最左侧增加用户形象 icon（`CircleUserRound`）。
+- 保留退出按钮的 shadcn/Radix `Tooltip` 与 `Dialog` 二次确认。
+
+### Cycle 16 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
 ## Cycle 11 - 关键日志时间按本机时区显示
 
 | # | 节点 | 状态 | 产物 | 备注 |

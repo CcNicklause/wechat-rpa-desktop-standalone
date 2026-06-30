@@ -133,3 +133,41 @@ test('audit result badges translate queued accepted and blocked states', async (
   assert.equal(translateAuditLog({ event_type: 'rpa.real.completed', result: 'completed' }).displayResult, '已完成');
   assert.equal(translateAuditLog({ event_type: 'rpa.real.completed', result: 'business_outcome' }).displayResult, '业务结果');
 });
+
+test('sidebar shows user identity as the header and protects logout from accidental clicks', () => {
+  const sidebar = readFileSync(new URL('../../src/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
+  const tooltip = readFileSync(new URL('../../src/components/ui/tooltip.tsx', import.meta.url), 'utf8');
+  const dialog = readFileSync(new URL('../../src/components/ui/dialog.tsx', import.meta.url), 'utf8');
+  const packageJson = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
+  const guidelines = readFileSync(new URL('../../docs/development-guidelines.md', import.meta.url), 'utf8');
+
+  assert.match(sidebar, /className="w-52/);
+  assert.doesNotMatch(sidebar, />WeChat RPA</);
+  assert.match(sidebar, /const displayName = user\?\.name \|\| user\?\.phone \|\| 'Guest'/);
+  assert.match(sidebar, /const displayPhone = user\?\.phone \|\| '未绑定手机号'/);
+  assert.match(sidebar, /<h2 className="text-base font-bold text-foreground">微信助手<\/h2>/);
+  assert.match(sidebar, /CircleUserRound/);
+  assert.match(sidebar, /<p className="truncate text-xs font-semibold text-foreground">\{displayName\}<\/p>/);
+  assert.match(sidebar, /<p className="truncate text-\[10px\] text-muted-foreground">\{displayPhone\}<\/p>/);
+  assert.match(sidebar, /<div className="mt-auto border-t border-border\/70 pt-3">/);
+  assert.match(sidebar, /<div className="flex items-center gap-2.5">/);
+  assert.match(sidebar, /TooltipProvider/);
+  assert.match(sidebar, /TooltipTrigger/);
+  assert.match(sidebar, /TooltipContent/);
+  assert.match(sidebar, /Dialog open=\{logoutDialogOpen\}/);
+  assert.match(sidebar, /DialogContent/);
+  assert.match(sidebar, /DialogTitle/);
+  assert.match(sidebar, /DialogDescription/);
+  assert.match(sidebar, /LogOut/);
+  assert.match(sidebar, /aria-label="安全退出"/);
+  assert.match(sidebar, />\s*安全退出\s*<\/Button>/);
+  assert.match(sidebar, /退出后需要重新登录才能继续操作本机微信助手/);
+  assert.doesNotMatch(sidebar, /再次点击退出图标，将退出当前账号/);
+  assert.doesNotMatch(sidebar, /logoutConfirmUntil/);
+  assert.doesNotMatch(sidebar, /variant="destructive" onClick=\{logout\} className="w-full"/);
+  assert.ok(sidebar.indexOf('<nav className="space-y-1.5">') < sidebar.indexOf('Dialog open={logoutDialogOpen}'));
+  assert.match(tooltip, /@radix-ui\/react-tooltip/);
+  assert.match(dialog, /@radix-ui\/react-dialog/);
+  assert.match(packageJson, /"@radix-ui\/react-tooltip"/);
+  assert.match(guidelines, /前端交互组件优先使用 shadcn\/Radix/);
+});

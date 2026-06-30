@@ -653,7 +653,15 @@ npx tsc --noEmit -p .
 ```
 结果：无报错
 
----
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
 
 ## Cycle 11 - 关键日志时间按本机时区显示
 
@@ -697,3 +705,143 @@ node --test scripts/tests/boardCopy.test.mjs
 node --test scripts/tests/boardCopy.test.mjs
 ```
 结果：10/10 passed
+
+---
+
+## Cycle 13 - 侧边栏身份区与退出防误触
+
+### 调整原因
+
+- 侧栏顶部原先固定显示 `WeChat RPA`，用户昵称只作为次级小字，不符合登录身份的主视觉层级。
+- 侧栏宽度 `w-64` 对当前导航项偏宽。
+- 底部整宽红色“安全退出”按钮视觉权重过高，存在误触风险。
+
+### 实际落地
+
+- `Sidebar` 宽度从 `w-64` 调整为 `w-56`，padding 从 `p-6` 调整为 `p-4`。
+- 侧栏顶部主标题改为 `user.name || user.phone || 'Guest'`，并用首字符头像占据原品牌图标位置。
+- 移除侧栏头部固定 `WeChat RPA` 文案，保留角色 badge 与“微信助手”辅助说明。
+- “安全退出”改为底部右侧 `LogOut` 图标按钮，使用 `aria-label` / `title` 保持可访问性提示。
+- 退出需要二次点击：首次点击弹出 toast，4 秒内再次点击图标才调用 `logout()`。
+
+### Cycle 13 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+---
+
+## Cycle 14 - 侧边栏 shadcn 交互收敛
+
+### 调整原因
+
+- `w-56` 仍略宽，用户希望侧栏再收窄一些。
+- 底部右侧单独退出图标导致左侧区域空白明显。
+- 退出按钮 hover 提示和二次确认应使用 shadcn/Radix 组件，而不是 toast-only 交互。
+- 用户身份区需要同时显示昵称和手机号，便于确认当前登录账号。
+
+### 实际落地
+
+- `Sidebar` 宽度从 `w-56` 调整为 `w-52`。
+- 用户身份区改为头像 + 两行信息：第一行昵称，第二行手机号；角色 badge 与“微信助手”作为第三行辅助信息。
+- 退出图标移到用户身份区右侧，不再占用底部独立区域。
+- 新增 `src/components/ui/tooltip.tsx`，基于 `@radix-ui/react-tooltip` 封装 shadcn 风格 Tooltip。
+- 新增 `src/components/ui/dialog.tsx`，基于 `@radix-ui/react-dialog` 封装 shadcn 风格 Dialog。
+- 点击退出图标打开 Dialog；点击 Dialog 内“安全退出”才调用 `logout()`。
+- `docs/development-guidelines.md` 增加前端组件准则：优先 shadcn/Radix，缺组件时先补 `ui` 封装。
+
+### Cycle 14 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+---
+
+## Cycle 15 - 侧边栏退出位置再收敛
+
+### 调整原因
+
+- 退出按钮放在用户身份区右侧，虽然节省空间，但视觉上过于突兀。
+- 用户身份区应只承担“当前账号是谁”的识别职责，危险操作应下沉到更低权重的位置。
+
+### 实际落地
+
+- 从侧栏顶部用户区移除退出按钮。
+- 在侧栏底部新增 `mt-auto` 操作区，用 `border-t` 与导航区域分隔。
+- 退出按钮保留右对齐小图标形式，并继续使用 shadcn/Radix `Tooltip` 和 `Dialog` 二次确认。
+- 测试新增顺序断言：`Dialog open={logoutDialogOpen}` 必须出现在 `<nav>` 之后，防止退出入口回到顶部。
+
+### Cycle 15 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+---
+
+## Cycle 16 - 侧边栏品牌区与账号操作条重排
+
+### 调整原因
+
+- 顶部应表达当前工具身份“微信助手”，而不是继续承载当前登录账号。
+- 昵称和手机号与退出操作更相关，应放在退出按钮左侧，形成一个完整账号操作条。
+- 账号操作条左侧需要用户形象 icon，帮助区分“应用品牌”和“当前账号”。
+
+### 实际落地
+
+- 顶部品牌区改为 `Bot` 图标 + 大字“微信助手”，保留角色 badge 与辅助文案。
+- 移除顶部的昵称和手机号展示。
+- 底部操作区改为三段：`CircleUserRound` 用户 icon、昵称/手机号两行、退出图标按钮。
+- 退出继续使用 shadcn/Radix `Tooltip` 悬浮提示和 `Dialog` 二次确认。
+
+### Cycle 16 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：11/11 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：14/14 passed
+
+```powershell
+pnpm -s build
+```
+结果：构建通过

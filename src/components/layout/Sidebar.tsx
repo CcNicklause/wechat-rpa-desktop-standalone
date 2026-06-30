@@ -1,7 +1,18 @@
-import { LayoutDashboard, UserCheck, ShieldAlert, FlaskConical, Radio } from 'lucide-react';
+import { useState } from 'react';
+import { LayoutDashboard, UserCheck, ShieldAlert, FlaskConical, Radio, LogOut, Bot, CircleUserRound } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 // 路由集中定义在这里，AppShell + Sidebar 共用，新增/重命名都改这一处。
 export const ROUTE_DEFINITIONS = [
@@ -25,20 +36,25 @@ export function Sidebar({
 }: SidebarProps) {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const displayName = user?.name || user?.phone || 'Guest';
+  const displayPhone = user?.phone || '未绑定手机号';
+
+  const handleLogoutClick = async () => {
+    setLogoutDialogOpen(false);
+    await logout();
+  };
 
   return (
-    <aside className="w-64 border-r border-border bg-card p-6 flex flex-col justify-between relative z-10">
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-secondary text-secondary-foreground rounded-lg shadow-sm">
-            <span className="text-xl">🤖</span>
+    <aside className="w-52 border-r border-border bg-card p-4 flex flex-col relative z-10">
+      <div className="space-y-5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground shadow-sm">
+            <Bot className="h-5 w-5" />
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-foreground tracking-wide">WeChat RPA</h2>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] text-muted-foreground font-semibold">
-                {user?.name || user?.phone || 'Guest'}
-              </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold text-foreground">微信助手</h2>
+            <div className="mt-1 flex items-center gap-1.5">
               <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 leading-none shrink-0">
                 {user?.role || 'agent'}
               </Badge>
@@ -74,13 +90,54 @@ export function Sidebar({
             );
           })}
         </nav>
-
-
       </div>
 
-      <Button variant="destructive" onClick={logout} className="w-full">
-        安全退出
-      </Button>
+      <div className="mt-auto border-t border-border/70 pt-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <CircleUserRound className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold text-foreground">{displayName}</p>
+            <p className="truncate text-[10px] text-muted-foreground">{displayPhone}</p>
+          </div>
+          <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    onClick={() => setLogoutDialogOpen(true)}
+                    aria-label="安全退出"
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">安全退出</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>确认退出当前账号？</DialogTitle>
+                <DialogDescription>
+                  退出后需要重新登录才能继续操作本机微信助手。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline">取消</Button>
+                </DialogClose>
+                <Button variant="destructive" onClick={handleLogoutClick}>
+                  安全退出
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
     </aside>
   );
 }

@@ -26,10 +26,11 @@
 
 ### UI 与 Tailwind 使用边界
 
-- 用 shadcn 风格原子组件承载重复交互控件。
+- 前端交互组件优先使用 shadcn/Radix 原子组件；当前代码库没有对应组件时，先补齐 `src/components/ui/` 下的 shadcn 风格封装，再写业务组件。
   - 表单控件使用 `Input`、`Textarea`、`Select`、`Label`。
   - 状态展示优先使用 `Badge`。
   - 按钮统一使用 `Button`。
+  - 悬浮提示使用 `Tooltip`，确认弹窗使用 `Dialog`/`AlertDialog`，不要在业务组件里手搓浮层、焦点管理或二次确认交互。
 - 用 Tailwind 管页面布局。
   - Grid、Flex、间距、滚动区域、响应式布局可以直接写 class。
   - 不要为一次性布局抽组件。
@@ -46,7 +47,7 @@
 ### 确认与危险操作
 
 - 真实 RPA、清空队列、清理待对账等危险操作必须二次确认。
-- 目前允许使用 `window.confirm`；如果后续引入 `AlertDialog`，统一替换，不要混用多套确认体验。
+- 优先使用 shadcn/Radix 的 `Dialog` 或 `AlertDialog` 承载二次确认；不要新增 `window.confirm` 或 toast-only 确认。
 
 ## 后端规范
 
