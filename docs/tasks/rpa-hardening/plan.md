@@ -712,3 +712,47 @@ def fuzzy_text_hit(
 ## STATUS
 
 STATUS: CONVERGED
+
+---
+
+## 加微链路 fuzzy 匹配逻辑 · 完整审计清单
+
+> 2026-06-30 对加微链路 `fuzzy_text_hit` 及各读屏环节做的完整审查。Cycle 4 已落地第 1 类;
+> 第 2–7 类为后续 Cycle 的依据,按收益/风险排序。
+
+### 一、fuzzy_text_hit 核心逻辑漏洞(影响所有环节)
+
+| # | 漏洞 | 位置 | 状态 |
+|---|---|---|---|
+| 1 | **substring 阶段无长度守卫且优先级最高**:短关键词(发消息/已发送/OK/添加)作为子串极易误命中。守卫只加在 partial_ratio 上 | vision_locator.py `fuzzy_text_hit` L187-191 | ✅ Cycle 4 已修(allow_fuzzy 关 full_text 的 fuzzy;substring 本身方向正确) |
+| 2 | **full_text 整段走 partial_ratio 滑窗**:`len(text) >> len(kw)`,50% 长度守卫永不触发,退化为滑窗找等长最优局部对齐,假阳性高 | wechat_rpa.py `_detect_screen_state` L201 | ✅ Cycle 4 已修(full_text 调用传 allow_fuzzy=False) |
+| 3 | **full_text 无分隔拼接丢失词块边界**:`"".join(w.text)`,相邻词块可能拼出跨边界伪子串 | wechat_rpa.py L190 | ❌ 未修(留后续) |
+| 4 | **min_ratio=80 对 partial_ratio 偏低**:短关键词几乎"沾边即命中" | — | ✅ Cycle 4 已修(自适应 ≤3→90/≥4→80) |
+
+### 二、各业务环节漏洞
+
+| 环节 | 位置 | 漏洞 | 状态 |
+|---|---|---|---|
+| 1 · 搜索结果判定 | wechat_rpa.py L1376 `["RISK_CONTROL","TARGET_NOT_FOUND","ALREADY_FRIEND"]` | ALREADY_FRIEND 关键词过短过通用("发消息"3字/"Message");RISK_CONTROL 优先级最高且代价最大(误熔断当天全部任务),关键词"请稍后再试"/"操作频繁"在网络慢提示下可能误命中。优先级调整只覆盖 ALREADY_FRIEND vs TARGET_NOT_FOUND,RISK_CONTROL 最高优先级未受约束 | ❌ 未修 |
+| 2 · 无添加按钮二次判定 | wechat_rpa.py L1389 含 `ADD_REJECTED` | ADD_REJECTED 关键词"需要先添加"/"对方拒绝"在 full_text 滑窗下可能误命中,把"搜不到"误判成"被拒";误命中即截断,走不进 L1400 兜底 | ❌ 未修 |
+| 3 · 验证窗缺失二次判定 ⚠️高危 | wechat_rpa.py L1410,命中 SEND_SUCCESS 直接 return success | SEND_SUCCESS 关键词"已发送"(3字)/"等待验证"(4字)在 full_text 极易出现(历史聊天残留);误命中 → 跳过验证语填写却记为成功,客户收不到验证语系统却认为已发送 | ❌ 未修 |
+| 4 · 发送后结果确认 ⚠️脏数据源 | wechat_rpa.py L1445,读屏范围 `wx_window`(整个主窗口) | full_text 最脏:主窗口含聊天列表/菜单/最近消息;在这些文本里找"已发送"/"操作频繁"假阳性最高,却作为成功/熔断判定依据 | ❌ 未修 |
+| 5 · 重试前 probe | friend_acceptance.py L167 `[..., "SEND_SUCCESS"]` | SEND_SUCCESS 排在 TARGET_NOT_FOUND 之后,flow.md 只修了 ALREADY_FRIEND vs TARGET_NOT_FOUND 顺序;若屏幕残留"搜索结果为空"或 OCR 误读,TARGET_NOT_FOUND 先命中 → 把"已发送申请"误判成"搜不到"。probe 只 sleep 2.0,页面慢时读到上一帧残留 | ❌ 未修 |
+
+### 三、OCR 意图定位环节(坐标定位,非状态判定)
+
+| 漏洞 | 位置 | 状态 |
+|---|---|---|
+| 短关键词误定位:OCR_INTENT_MAP 中"添加"/"搜索"/"确定"/"发送"/"OK"均 2 字;"OK" substring 命中 book/lookup/token;"发送" in "发送失败" 把错误提示当发送按钮 → 点击错误位置 | vision_locator.py L225-242,调用 L760/L814 | ❌ 未修 |
+| 多 intent 共享"添加":wechat_add_button/menu_add_friends/add_to_contacts 都含"添加",命中顺序取决于 template_names 顺序,可能点到错的"添加"控件 | vision_locator.py OCR_INTENT_MAP | ❌ 未修 |
+| Y<55 标题栏排除是像素硬编码:高 DPI/缩放下标题栏高度变化,排除失效 → 把验证窗标题当输入框定位,粘贴到错误位置(上一轮"微信卡死"类问题潜在复发点) | vision_locator.py L764/L818 | ❌ 未修 |
+
+### 四、建议(按性价比排序,供后续 Cycle 选用)
+
+1. ~~substring 也加方向正确的长度约束~~ → Cycle 4 已用 allow_fuzzy 间接处理 full_text 路径
+2. ~~full_text 整段禁用 partial_ratio~~ → ✅ Cycle 4 已做
+3. **短关键词收紧**:ALREADY_FRIEND 去掉裸"发消息"/"Message",改用更长组合或控件上下文;SEND_SUCCESS 去掉裸"已发送",用"好友申请已发送"等更长短语 ← **收益次高**
+4. **重排状态优先级**:RISK_CONTROL 不应无条件最高——要求命中 ≥2 个 RISK 关键词或关键词长度 ≥4 才允许熔断;补 SEND_SUCCESS vs TARGET_NOT_FOUND 顺序
+5. **环节 4 读屏范围收窄**:发送后判定限定在 Toast/验证窗区域,而非整个主窗口;或要求 SEND_SUCCESS 关键词出现在屏幕中央 ROI
+6. **Y<55 改为相对窗口标题栏高度的比例阈值**
+7. ~~min_ratio 按关键词长度自适应~~ → ✅ Cycle 4 已做

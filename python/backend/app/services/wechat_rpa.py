@@ -933,7 +933,14 @@ def _click_wechat_add_button_by_cached_vision(auto, wx_window: WindowHandle) -> 
     top_limit = max(120, int(height * 0.22))
     if local_y > top_limit:
         return None
-    if local_x < int(width * 0.35) or local_x > int(width * 0.75):
+    # 加号在微信主窗口的相对 x 随内部布局浮动：左侧导航栏/聊天列表宽度变化、
+    # 搜索框是否展开都会让加号左右移动（实测同尺寸同 DPI 下 ratio 从 0.31 到 0.56 不等）。
+    # 下限不能卡太高，否则"加号偏左"布局会被误判成非加号区拒掉，导致主路径 Miss、
+    # 降级到 search_anchor 慢路径。0.18 与 _click_wechat_add_button_by_search_anchor
+    # 的 header 模板下限（width*0.18）对齐，统一两条路径的几何标准。
+    # 安全性由 top_limit（仅顶部 22%）+ threshold=0.85 + 拒绝 OCR 命中三重保障，
+    # 聊天列表/头像区在 y > top_limit 段，不会被误点。
+    if local_x < int(width * 0.18) or local_x > int(width * 0.75):
         return None
 
     desktop.click(match.center_x, match.center_y)

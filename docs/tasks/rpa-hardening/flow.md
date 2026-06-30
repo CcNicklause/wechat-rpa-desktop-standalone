@@ -473,3 +473,62 @@ uv run pytest backend/app/tests/test_friend_acceptance.py backend/app/tests/test
 - ✅ 其余用例零回归；关联 RPA 链路测试集 28 passed 零回归
 
 STATUS: READY_FOR_REVIEW
+
+
+## 2026-06-30 · 加微第一步 cached_vision 几何阈值误杀加号（链路拆解·加号定位）
+
+> 按"加微链路逐步拆解"思路审视第一步「找到添加 + 按钮」，发现 cached_vision
+> 主路径在"加号偏左"布局下被几何阈值误杀，降级到 search_anchor 慢路径。
+> 本节为代码现状记录，对账见下方根因。
+
+### 链路还原
+
+`_open_add_friends_entry`([wechat_rpa.py:943](../../../python/backend/app/services/wechat_rpa.py#L943)) 点加号三层兜底：
+1. **cached_vision**（主路径，模板/缓存，threshold=0.85，拒绝 OCR 命中）→ 命中即点
+2. **search_anchor**（兜底1，OCR 找"搜索"→ 右侧 ROI 模板匹配加号 → header 模板 0.90）
+3. 三层失败 → 抛 `ADD_PLUS_NOT_FOUND`
+
+### 现象
+
+audit log（`rpa_jobs.steps_json`）实证 2 个真实 job 全部 `ADD_PLUS_CACHED_VISION_MISS`，每次走 search_anchor 慢路径。`ADD_FRIENDS_PAGE_OPENED_BY_MENU_OFFSET`（+86 偏移）0/2 触发——菜单项模板 `menu_add_friends.png` score=1.000 稳定，+86 盲点是低频死兜底。
+
+### 根因（三轮真机实测 + job 实证锁定）
+
+cached_vision 的 x 几何约束原为 `local_x < width*0.35` 即拒（[wechat_rpa.py:936](../../../python/backend/app/services/wechat_rpa.py#L936)）。
+加号在微信主窗口的相对 x **随内部布局浮动**（左侧导航栏/聊天列表宽度、搜索框是否展开），不随 DPI、不随窗口宽度单一决定：
+
+| 场景 | 窗口宽 | DPI | 加号 center | local_x | ratio | 改前 0.35 |
+|---|---|---|---|---|---|---|
+| job 实证（偏左布局） | 1118 | 1.25 | 606 | 352 | 0.315 | **拒 → MISS** |
+| 真机实测（偏右布局） | 1118 | 1.25 | 876 | 622 | 0.556 | 放行 |
+
+同尺寸同 DPI，加号 ratio 从 0.31 到 0.56 浮动。0.35 这个绝对比例阈值扛不住布局变化——加号偏左（ratio<0.35）就被误判成"非加号区"拒掉，cached_vision 返回 None，降级 search_anchor。
+
+### 已落地
+
+[wechat_rpa.py:936](../../../python/backend/app/services/wechat_rpa.py#L936) x 下限 `0.35 → 0.18`，与 search_anchor 的 header 模板下限（`width*0.18`）对齐，统一两条路径几何标准。
+
+- 改后：偏左布局（ratio=0.315）放行，cached_vision 直接缓存命中点加号，不再走慢路径
+- 安全性不变：`top_limit`（仅顶部 22%）+ `threshold=0.85` + 拒绝 OCR 命中 三重保护，聊天列表在 y>top_limit 段不误点
+- 多 DPI/分辨率适配：阈值是相对比例，等比缩放下行为一致
+
+### 验证
+
+新增 `TestCachedAddButtonGeometry` 6 个用例（[test_vision_locator.py](../../../python/backend/app/tests/test_vision_locator.py)）：
+- 偏左布局（job 真实坐标 center=606）放行并点击 — 回归保护
+- 偏右布局（实测 center=876）放行
+- 极左（ratio<0.18）/ 极右（ratio>0.75）/ 过低（y>顶部22%）仍拒
+- OCR 命中仍拒
+
+```
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 74 passed（原 68 + 新 6），零回归
+```
+
+### 推翻的中间推断（留档供复盘）
+
+- ❌ "DPI 决定"：1.25 DPI 下两次同尺寸结果不同（ratio 0.315 vs 0.556）
+- ❌ "窗口宽度决定"：同宽度两次结果不同
+- ✅ "微信内部布局决定加号相对位置" + 0.35 绝对阈值 → 偏左布局误杀
+
+STATUS: READY_FOR_REVIEW（链路拆解·加号定位）

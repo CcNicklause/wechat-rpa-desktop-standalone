@@ -833,6 +833,102 @@ class TestFuzzyTextHit(unittest.TestCase):
         # 这里我们不断言 fuzzy 一定命中，只确认它不抛异常即可
 
 
+class TestCachedAddButtonGeometry(unittest.TestCase):
+    """cached_vision 加号几何判定：0.18 下限适配"加号偏左"布局。
+
+    根因：加号在微信主窗口的相对 x 随内部布局浮动。job 实证同尺寸(1118x809)
+    同 DPI(1.25)下，加号 center 可在 606(偏左, ratio=0.315) 到 876(偏右, ratio=0.556)
+    之间浮动。原 0.35 下限会把 ratio=0.315 的偏左加号误拒，导致主路径 Miss、
+    降级到 search_anchor 慢路径。改为 0.18 后覆盖所有现实布局。
+    """
+
+    def _make_match(self, center_x, center_y, template_name="cache_wechat_add_button.png"):
+        from backend.app.services.vision_locator import MatchResult
+        return MatchResult(
+            template_name=template_name,
+            center_x=center_x,
+            center_y=center_y,
+            score=1.0,
+        )
+
+    def _run_cached_vision(self, window_rect, match_center):
+        """跑 _click_wechat_add_button_by_cached_vision，返回 (result, clicked_coords)。
+
+        window_rect: (left, top, right, bottom)
+        match_center: (cx, cy) find_first 返回的命中中心
+        """
+        from backend.app.services import wechat_rpa
+        from backend.app.services.vision_locator import MatchResult
+
+        left, top, right, bottom = window_rect
+        match = self._make_match(*match_center)
+        clicked = []
+
+        mock_desktop = MagicMock()
+        mock_desktop.get_bounding_rectangle.return_value = window_rect
+        mock_desktop.click.side_effect = lambda x, y: clicked.append((x, y))
+
+        with patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop):
+            mock_vision.find_first.return_value = match
+            result = wechat_rpa._click_wechat_add_button_by_cached_vision(None, MagicMock())
+        return result, clicked
+
+    def test_left_layout_add_button_not_rejected(self):
+        """偏左布局（job 实证 center=606, ratio=0.315）不应被几何拒。
+
+        回归保护：0.35 下限会拒掉这个 case，改 0.18 后必须放行并点击。
+        """
+        # job 真实数据：window left=254 w=1118，加号 center=(606,184)
+        result, clicked = self._run_cached_vision((254, 113, 1372, 922), (606, 184))
+        self.assertIsNotNone(result, "偏左布局加号不应被几何阈值误拒")
+        self.assertEqual(clicked, [(606, 184)])
+
+    def test_right_layout_add_button_passes(self):
+        """偏右布局（实测 center=876, ratio=0.556）放行。"""
+        result, clicked = self._run_cached_vision((254, 113, 1372, 922), (876, 184))
+        self.assertIsNotNone(result)
+        self.assertEqual(clicked, [(876, 184)])
+
+    def test_too_left_still_rejected(self):
+        """极左（ratio<0.18）仍应拒，避免误点左侧边缘元素。"""
+        # width=1118, 0.18*1118=201，local_x=150 → ratio=0.134 < 0.18
+        result, clicked = self._run_cached_vision((254, 113, 1372, 922), (254 + 150, 184))
+        self.assertIsNone(result, "ratio<0.18 的极左命中仍应被拒")
+        self.assertEqual(clicked, [])
+
+    def test_too_right_still_rejected(self):
+        """极右（ratio>0.75）仍应拒。"""
+        # width=1118, 0.75*1118=838，local_x=900 → ratio=0.805 > 0.75
+        result, clicked = self._run_cached_vision((254, 113, 1372, 922), (254 + 900, 184))
+        self.assertIsNone(result, "ratio>0.75 的极右命中仍应被拒")
+        self.assertEqual(clicked, [])
+
+    def test_too_low_still_rejected(self):
+        """y 超过顶部 22% 仍应拒（防误点聊天列表区）。"""
+        # height=809, top_limit=max(120, 0.22*809)=177，local_y=300
+        result, clicked = self._run_cached_vision((254, 113, 1372, 922), (606, 113 + 300))
+        self.assertIsNone(result, "y 超过顶部 22% 的命中仍应被拒")
+        self.assertEqual(clicked, [])
+
+    def test_ocr_hit_rejected(self):
+        """OCR 命中（template_name 以 ocr_ 开头）应拒绝，避免全窗口误点。"""
+        from backend.app.services import wechat_rpa
+        from backend.app.services.vision_locator import MatchResult
+
+        match = MatchResult(
+            template_name="ocr_wechat_add_button.png",
+            center_x=606, center_y=184, score=1.0,
+        )
+        mock_desktop = MagicMock()
+        mock_desktop.get_bounding_rectangle.return_value = (254, 113, 1372, 922)
+        with patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop):
+            mock_vision.find_first.return_value = match
+            result = wechat_rpa._click_wechat_add_button_by_cached_vision(None, MagicMock())
+        self.assertIsNone(result, "OCR 命中应被拒绝")
+
+
 if __name__ == '__main__':
     unittest.main()
 
