@@ -682,3 +682,66 @@ uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_fr
 或调整三轨顺序让模板优先于 OCR。这是 cached_vision 主路径在冷启动/无缓存场景下的命中率问题。
 
 STATUS: READY_FOR_REVIEW（链路拆解·缓存机制）
+
+
+## 2026-06-30 · _confirm_friend_profile_window 偏移多 DPI 适配（链路拆解·通过朋友验证页）
+
+> 拆解「点添加到通讯录 → 验证窗」段，发现 _confirm_friend_profile_window
+> 偏移兜底坐标混用绝对像素与比例，多 DPI 下不准。
+
+### 链路还原
+
+`_confirm_friend_profile_window`([wechat_rpa.py:1098](../../../python/backend/app/services/wechat_rpa.py#L1098))：
+处理"对方加你、你点通过"的"通过朋友验证"资料页。
+- 主路径：`vision.click_first(["send_button","confirm_button","verify_confirm_button"])` 模板匹配确认按钮
+- 兜底：模板失败 → 按窗口底部固定区域偏移点击确认按钮
+- 校验：点完检查窗口是否关闭，未关抛 `FRIEND_PROFILE_CONFIRM_FAILED`
+
+### 漏洞 3 · 偏移 y 坐标混用绝对像素与比例
+
+[wechat_rpa.py:1121](../../../python/backend/app/services/wechat_rpa.py#L1121) 原代码：
+```python
+click_x = left + int(width * 0.28)
+click_y = bottom - min(40, max(28, int(height * 0.05)))
+```
+`click_y` 混用了绝对像素 28/40（clamp 区间）与比例 `height*0.05`。高 DPI 下 28/40 不缩放，
+`height*0.05` 超过 40 就被 clamp 回 40（1.0 经验值），落点偏。与已修的菜单 +86 同类问题。
+
+audit 实证：`FRIEND_PROFILE_CONFIRMED_BY_VISION`/`BY_OFFSET` 均 0/2 触发（两个真实 job 都走
+填验证语分支，未进"通过朋友验证"页）。偏移兜底是低频死兜底，但多 DPI 适配仍需修对。
+
+### 已落地
+
+[wechat_rpa.py:1117-1133](../../../python/backend/app/services/wechat_rpa.py#L1117)：
+```python
+dpi_scale = get_ocr_adapter().get_dpi_scale(WindowHandle(native_id=target_window.native_id))
+bottom_offset = max(15, round(34 * dpi_scale))
+click_y = bottom - bottom_offset
+```
+- `click_x` 保持纯比例 0.28（已正确，不动）
+- `click_y` 改纯 DPI 缩放：base=34（原 clamp 区间 28~40 中值），`max(15, ...)` 防异常 DPI 回退时偏移过小
+- 与菜单 +86 偏移修法统一（`round(base * dpi_scale)`）
+
+### 验证
+
+新增 `TestConfirmFriendProfileOffset` 5 用例（[test_vision_locator.py](../../../python/backend/app/tests/test_vision_locator.py)）：
+- 1.0/1.25/1.5 DPI 下 bottom_offset 分别 = 34/42/51（锁死多 DPI 回归）
+- DPI 异常低时偏移 ≥15
+- click_x 纯比例，与 DPI 无关
+
+```
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 88 passed（原 83 + 新 5），零回归
+```
+
+### 本段其它审视结论（未改，留档）
+
+| # | 点 | 结论 |
+|---|---|---|
+| 1 | `_click_add_friend` 只捕获 VISION_TARGET_NOT_FOUND | 可接受（锁屏等冒泡为系统失败，合理） |
+| 2 | `_confirm_friend_profile_window` 偏移点错跳到别的页可能误报成功 | 中危，但 0/2 触发，留后续 |
+| 4 | 验证窗缺失分支读屏判终态 | 逻辑正确（杜绝盲操作） |
+| 5 | 验证窗轮询 10×0.3s=3s | 慢机器可能不够，有 A-1 兜底，低危 |
+| 6 | "通过朋友验证"窗口名硬编码中文 | 繁体/英文环境安全降级，低危 |
+
+STATUS: READY_FOR_REVIEW（链路拆解·通过朋友验证页）

@@ -1136,6 +1136,85 @@ class TestAddFriendsMenuOffset(unittest.TestCase):
         self.assertEqual(clicked[-1], (606, 204))
 
 
+class TestConfirmFriendProfileOffset(unittest.TestCase):
+    """_confirm_friend_profile_window 偏移兜底：底部按钮 y 偏移按 DPI 缩放。
+
+    原 min(40, max(28, height*0.05)) 混用绝对像素 28/40 与比例，高 DPI 下不缩放。
+    改为 round(34*dpi_scale)，与菜单 +86 偏移同思路。
+    """
+
+    def _run_confirm_offset(self, dpi_scale, window_rect=(100, 100, 700, 700)):
+        """模拟"通过朋友验证"页 + 模板失败 → 走偏移兜底。返回 (clicked, raised)。"""
+        from backend.app.services import wechat_rpa
+        from backend.app.core.errors import AppError
+        from backend.app.services.platform import WindowHandle
+
+        left, top, right, bottom = window_rect
+        width = right - left
+        height = bottom - top
+        clicked = []
+
+        mock_desktop = MagicMock()
+        mock_desktop.get_bounding_rectangle.return_value = window_rect
+        mock_desktop.click.side_effect = lambda x, y: clicked.append((x, y))
+
+        mock_ocr = MagicMock()
+        mock_ocr.get_dpi_scale.return_value = dpi_scale
+
+        target = WindowHandle(native_id=12345, rect=window_rect)
+
+        raised = None
+        with patch('backend.app.services.wechat_rpa._window_name', return_value='通过朋友验证'), \
+             patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop), \
+             patch('backend.app.services.wechat_rpa.get_ocr_adapter', return_value=mock_ocr), \
+             patch('backend.app.services.wechat_rpa._find_verify_window', return_value=None), \
+             patch('backend.app.services.wechat_rpa._sleep'):
+            # 模板匹配失败 → 触发偏移兜底
+            mock_vision.click_first.side_effect = AppError("VISION_TARGET_NOT_FOUND", "确认按钮未匹配")
+            try:
+                ret = wechat_rpa._confirm_friend_profile_window(target, lambda s: None)
+            except AppError as e:
+                raised = e
+        return clicked, raised, (ret if not raised else None)
+
+    def test_offset_scales_with_dpi_1_0(self):
+        """1.0 DPI 下底部偏移 = 34。"""
+        # window bottom=700, 700-34=666
+        clicked, raised, ret = self._run_confirm_offset(1.0)
+        self.assertIsNone(raised)
+        self.assertTrue(ret)
+        self.assertEqual(clicked[-1][0], 100 + int(600 * 0.28))  # click_x 纯比例
+        self.assertEqual(clicked[-1][1], 700 - 34)
+
+    def test_offset_scales_with_dpi_1_25(self):
+        """1.25 DPI 下底部偏移 = round(34*1.25)=42（Python round 银行家舍入）。
+        原 28/40 clamp 在 1.25 下仍卡 40，偏小。"""
+        clicked, raised, ret = self._run_confirm_offset(1.25)
+        self.assertIsNone(raised)
+        self.assertTrue(ret)
+        self.assertEqual(clicked[-1][1], 700 - 42)
+
+    def test_offset_scales_with_dpi_1_5(self):
+        """1.5 DPI 下底部偏移 = round(34*1.5)=51。"""
+        clicked, raised, ret = self._run_confirm_offset(1.5)
+        self.assertIsNone(raised)
+        self.assertEqual(clicked[-1][1], 700 - 51)
+
+    def test_offset_floor_when_dpi_low(self):
+        """DPI 异常低时偏移 ≥15（防 0 偏移点到窗口最底边外）。"""
+        clicked, raised, ret = self._run_confirm_offset(0.1)
+        self.assertIsNone(raised)
+        # max(15, round(34*0.1))=max(15,3)=15
+        self.assertEqual(clicked[-1][1], 700 - 15)
+
+    def test_x_is_pure_ratio(self):
+        """click_x 是纯比例 0.28，不随 DPI 变（多 DPI 下 x 行为一致）。"""
+        c1, _, _ = self._run_confirm_offset(1.0)
+        c2, _, _ = self._run_confirm_offset(1.5)
+        self.assertEqual(c1[-1][0], c2[-1][0], "click_x 应为纯比例，与 DPI 无关")
+
+
 if __name__ == '__main__':
     unittest.main()
 

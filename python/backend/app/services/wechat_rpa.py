@@ -1119,11 +1119,22 @@ def _confirm_friend_profile_window(target_window: WindowHandle, mark: Callable[[
         width = max(right - left, 1)
         height = max(bottom - top, 1)
         click_x = left + int(width * 0.28)
-        click_y = bottom - min(40, max(28, int(height * 0.05)))
+        # 底部确认按钮距窗口底边的偏移。原硬编码 min(40, max(28, height*0.05))
+        # 混用了绝对像素 28/40 与比例，高 DPI 下 28/40 不缩放会偏。改为按 DPI 缩放
+        # （与菜单 +86 偏移同思路），base 取 34（原 clamp 区间 28~40 的中值）。
+        try:
+            dpi_scale = get_ocr_adapter().get_dpi_scale(
+                WindowHandle(native_id=target_window.native_id)
+            )
+        except Exception:
+            dpi_scale = 1.0
+        bottom_offset = max(15, round(34 * dpi_scale))
+        click_y = bottom - bottom_offset
         desktop.click(click_x, click_y)
         mark(
             "FRIEND_PROFILE_CONFIRMED_BY_OFFSET: "
-            f"已按底部按钮固定区域确认“通过朋友验证” x={click_x} y={click_y}"
+            f"已按底部按钮固定区域确认“通过朋友验证” x={click_x} y={click_y} "
+            f"bottom_offset={bottom_offset}(dpi={dpi_scale})"
         )
 
     _sleep(0.8)
