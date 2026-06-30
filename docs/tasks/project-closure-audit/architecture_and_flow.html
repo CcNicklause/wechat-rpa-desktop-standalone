@@ -328,6 +328,79 @@ graph TD
                     </div>
                 </div>
             </div>
+
+            <!-- 冷启动自学习视觉 + 缓存 OCR 兜底（QA 保证逻辑） -->
+            <div class="glass-panel rounded-2xl p-6 shadow-xl mt-8">
+                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> 冷启动自学习视觉定位 + 缓存 OCR 兜底（QA 保证逻辑）
+                </h3>
+                <div class="mermaid w-full overflow-x-auto bg-slate-900 rounded-xl p-4 border border-gray-800 flex justify-center">
+graph TD
+    A["开始定位界面元素"] --> B{"屏幕锁定或掉线?"}
+    B -->|是| C["直接报错退出"]
+    B -->|否| D["查本地记忆缓存"]
+    D -->|命中| OK["秒级定位并点击"]
+    D -->|未学过| E["读屏识别文字"]
+
+    E -->|找到| F["定位成功 不记入样本"]
+    E -->|未找到| G["图片模板比对"]
+    G -->|匹配| H["定位成功 记入样本"]
+    G -->|未匹配| I{"3次重试内?"}
+    I -->|是| A
+    I -->|否| J["保存截图报错 附OCR原文"]
+
+    F --> OK
+    H --> OK
+    OK --> K{"整条加微成功?"}
+    K -->|成功| L["正式记入缓存"]
+    K -->|失败| M["丢弃样本 不污染"]
+    L --> N["下次启动 秒级命中"]
+                </div>
+                <div class="mt-4 text-xs text-gray-400 leading-relaxed bg-gray-900/50 p-4 rounded-xl border border-gray-800/50">
+                    <strong>说明：</strong> 加微每一步定位都自带 <strong>"查记忆 → 读屏 → 图片比对"</strong> 三级兜底，前一级命中即返回。在其上叠加 <strong>自学习闭环</strong> 作为质量保证：定位成功后先暂存截图，只有整条加微流程跑通成功才正式"记住"这个位置（按屏幕分辨率/缩放/明暗主题分类存档），流程失败则丢弃，避免记错位置形成永久错误。<strong>首次使用</strong>本地无记忆时走读屏/图片比对慢路径并记住，<strong>第二次起</strong>即可直接命中记忆秒级定位——越用越快、越用越稳。读屏命中因可信度较低只用于本次定位、不记入学习样本，防止偶尔认错位置被固化。
+                </div>
+            </div>
+
+            <!-- QA 保证要点卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+                <div class="glass-panel rounded-2xl p-6 neon-border-cyan transition-all duration-300">
+                    <h4 class="text-base font-bold text-white mb-3">三级兜底定位</h4>
+                    <p class="text-xs text-gray-300 leading-relaxed mb-3">
+                        按从快到慢依次尝试，前一级命中即返回：
+                    </p>
+                    <ul class="text-xs text-gray-300 list-disc list-inside space-y-1.5">
+                        <li>① 查本地记忆（最快）</li>
+                        <li>② 读屏识别文字（OCR）</li>
+                        <li>③ 图片模板比对（最稳）</li>
+                    </ul>
+                    <p class="text-xs text-gray-400 leading-relaxed border-t border-gray-800 pt-3 mt-3">
+                        屏幕锁定 / 远程掉线时直接报错退出，不浪费时间空跑；画面空白或卡帧时跳过前两级直接图片比对。
+                    </p>
+                </div>
+
+                <div class="glass-panel rounded-2xl p-6 neon-border-violet transition-all duration-300">
+                    <h4 class="text-base font-bold text-white mb-3">自学习闭环（QA 核心）</h4>
+                    <ul class="text-xs text-gray-300 list-disc list-inside space-y-2">
+                        <li>只有"图片比对"命中的位置才记入学习样本</li>
+                        <li>"读屏识别"命中<strong class="text-amber-400">不记入</strong>，防偶尔认错被永久固化</li>
+                        <li>整条加微跑通成功 → 正式记住这个位置</li>
+                        <li>加微失败 → 丢弃本次样本，不污染记忆</li>
+                    </ul>
+                </div>
+
+                <div class="glass-panel rounded-2xl p-6 neon-border-emerald transition-all duration-300">
+                    <h4 class="text-base font-bold text-white mb-3">越用越快 · 越用越稳</h4>
+                    <p class="text-xs text-gray-300 leading-relaxed mb-2">
+                        <strong class="text-emerald-400">首次使用：</strong>本地无记忆 → 走读屏/图片比对（慢）→ 成功后记住位置。
+                    </p>
+                    <p class="text-xs text-gray-300 leading-relaxed mb-2">
+                        <strong class="text-cyan-400">第二次起：</strong>直接命中记忆 → 秒级定位，不再依赖慢路径。
+                    </p>
+                    <p class="text-xs text-gray-300 leading-relaxed border-t border-gray-800 pt-3 mt-3">
+                        记忆按屏幕分辨率 / 缩放比例 / 明暗主题分类存档，换电脑或换显示设置都能自适应。三级全失败时报错并附上读屏识别到的原文，便于人工排查。
+                    </p>
+                </div>
+            </div>
         </section>
 
         <!-- 3. 数据流向与对账机制板块 -->
