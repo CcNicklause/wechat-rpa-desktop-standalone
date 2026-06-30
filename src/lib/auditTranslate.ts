@@ -6,6 +6,19 @@ export interface TranslatedAudit {
   displayResult: string;
 }
 
+const AUDIT_RESULT_LABELS: Record<string, string> = {
+  success: '成功',
+  started: '已启动',
+  approved: '已批准',
+  accepted: '已接受',
+  completed: '已完成',
+  pending: '处理中',
+  queued: '排队中',
+  business_outcome: '业务结果',
+  failed: '失败',
+  blocked: '已阻断',
+};
+
 // 将技术日志翻译为对用户友好的白话文
 export function translateAuditLog(audit: AuditLog): TranslatedAudit {
   let displayTitle = audit.event_type;
@@ -81,6 +94,9 @@ export function translateAuditLog(audit: AuditLog): TranslatedAudit {
     case 'failed':
       displayResult = '失败';
       break;
+  }
+  if (audit.result && displayResult === audit.result) {
+    displayResult = AUDIT_RESULT_LABELS[audit.result] || audit.result;
   }
 
   return {

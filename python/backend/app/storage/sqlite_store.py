@@ -313,6 +313,21 @@ class SQLiteStore:
         job['steps'] = json.loads(job.pop('steps_json') or '[]')
         return job
 
+    def list_jobs_by_lead(self, lead_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                'SELECT * FROM rpa_jobs WHERE lead_id = ? ORDER BY updated_at DESC LIMIT ?',
+                (lead_id, limit),
+            ).fetchall()
+        jobs = []
+        for row in rows:
+            job = dict(row)
+            job['dry_run'] = bool(job['dry_run'])
+            job['human_approval'] = bool(job['human_approval'])
+            job['steps'] = json.loads(job.pop('steps_json') or '[]')
+            jobs.append(job)
+        return jobs
+
     def update_job(self, job_id: str, **fields: Any) -> dict[str, Any]:
         encoded = dict(fields)
         if 'steps' in encoded:

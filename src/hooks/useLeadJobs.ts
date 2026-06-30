@@ -1,5 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { requestLocalApi } from '@/lib/api';
 import type { JobSnapshot } from '@/stores/useDevTestStore';
 
 export interface JobMeta {
@@ -59,6 +62,24 @@ export function registerJobStarted(leadId: string, jobId: string): void {
     lastTimestamp: Date.now(),
     stepCount: 0,
   });
+}
+
+export function useLeadJobHistoryQuery(leadId: string) {
+  const setSnapshot = useLeadJobsStore((s) => s.setSnapshot);
+  const query = useQuery<JobSnapshot[]>({
+    queryKey: ['leadJobHistory', leadId],
+    queryFn: () => requestLocalApi<JobSnapshot[]>(
+      `/api/v1/rpa/jobs?lead_id=${encodeURIComponent(leadId)}&limit=50`,
+    ),
+    enabled: !!leadId,
+    staleTime: 8000,
+  });
+
+  useEffect(() => {
+    query.data?.forEach((snapshot) => setSnapshot(snapshot));
+  }, [query.data, setSnapshot]);
+
+  return query;
 }
 
 export const useLeadJobsStore = create<LeadJobsState>()(

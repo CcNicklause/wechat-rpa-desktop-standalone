@@ -2,6 +2,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { EmptyState } from '@/components/common/EmptyState';
 import { AuditLog } from '@/hooks/useAudits';
 import { translateAuditLog } from '@/lib/auditTranslate';
+import { formatLocalTime } from '@/lib/localTime';
 
 interface AuditListProps {
   audits: AuditLog[];
@@ -21,7 +22,7 @@ export function AuditList({ audits, className }: AuditListProps) {
             <div className="space-y-1">
               <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
                 <span className="font-mono text-primary">
-                  {audit.timestamp ? audit.timestamp.slice(11, 19) : '00:00:00'}
+                  {formatLocalTime(audit.timestamp)}
                 </span>
                 <StatusBadge status={audit.result} label={displayResult} />
               </div>

@@ -9,7 +9,7 @@ interface LeadTimelinePanelProps {
 }
 
 export function LeadTimelinePanel({ lead, audits, className }: LeadTimelinePanelProps) {
-  const filteredAudits = useLeadAudits(audits, lead?.phone || '');
+  const filteredAudits = useLeadAudits(audits, lead?.phone || '', lead?.id);
 
   if (!lead) {
     return (

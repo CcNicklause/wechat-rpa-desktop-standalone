@@ -6,10 +6,10 @@ import { LeadHeader } from './LeadHeader';
 import { LeadOverviewPanel } from './LeadOverviewPanel';
 import { LeadProcessPanel } from './LeadProcessPanel';
 import { LeadJobsPanel } from './LeadJobsPanel';
-import { useLeadJobsStore, selectLeadJobs, selectLatestJob } from '@/hooks/useLeadJobs';
+import { useLeadJobsStore, selectLeadJobs, selectLatestJob, useLeadJobHistoryQuery } from '@/hooks/useLeadJobs';
 import { useShallow } from 'zustand/react/shallow';
 import { Lead } from '@/hooks/useLeads';
-import { AuditLog } from '@/hooks/useAudits';
+import { AuditLog, useLeadAuditLogsQuery } from '@/hooks/useAudits';
 import { LEAD_DETAIL_TAB_LABELS, type LeadDetailTab } from '@/lib/leadDetailTabs';
 
 interface LeadDetailDrawerProps {
@@ -37,6 +37,9 @@ export function LeadDetailDrawer({
 }: LeadDetailDrawerProps) {
   // 无条件调用 hooks，让 selector 处理空值
   const leadIdStr = lead ? String(lead.id) : '';
+  useLeadJobHistoryQuery(leadIdStr);
+  const leadAuditsQuery = useLeadAuditLogsQuery(leadIdStr);
+  const scopedAudits = leadAuditsQuery.data ?? audits;
   const leadJobs = useLeadJobsStore(useShallow((s) => selectLeadJobs(s, leadIdStr)));
   const latestJob = useLeadJobsStore((s) => selectLatestJob(s, leadIdStr));
   const actualJobId = jobId || latestJob?.jobId || null;
@@ -71,7 +74,7 @@ export function LeadDetailDrawer({
             </TabsContent>
 
             <TabsContent value="process">
-              <LeadProcessPanel lead={lead} audits={audits} jobId={actualJobId} />
+              <LeadProcessPanel lead={lead} audits={scopedAudits} jobId={actualJobId} />
             </TabsContent>
 
             <TabsContent value="history">

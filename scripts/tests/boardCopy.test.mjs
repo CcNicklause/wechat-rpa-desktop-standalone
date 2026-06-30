@@ -86,3 +86,50 @@ test('selected lead row uses subtle highlight without a full outline ring', () =
   assert.match(leadsList, /border-primary\/40/);
   assert.match(leadsList, /bg-primary\/5/);
 });
+
+test('lead detail drawer hydrates history and audits from lead scoped APIs', () => {
+  const drawer = readFileSync(new URL('../../src/components/features/board/LeadDetailDrawer.tsx', import.meta.url), 'utf8');
+  const auditsHook = readFileSync(new URL('../../src/hooks/useAudits.ts', import.meta.url), 'utf8');
+  const jobsHook = readFileSync(new URL('../../src/hooks/useLeadJobs.ts', import.meta.url), 'utf8');
+
+  assert.match(jobsHook, /useLeadJobHistoryQuery/);
+  assert.match(jobsHook, /\/api\/v1\/rpa\/jobs\?lead_id=/);
+  assert.match(drawer, /useLeadJobHistoryQuery\(leadIdStr/);
+  assert.match(auditsHook, /useLeadAuditLogsQuery/);
+  assert.match(auditsHook, /\/api\/v1\/audit\?lead_id=/);
+  assert.doesNotMatch(drawer, /audits=\{audits\}/);
+});
+
+test('audit timestamps render using the current machine local time', async () => {
+  const { formatLocalTime } = await loadTsModule('../../src/lib/localTime.ts');
+  const source = '2026-06-29T11:47:52.822153+00:00';
+  const local = new Date(source);
+  const pad = (n) => String(n).padStart(2, '0');
+
+  assert.equal(
+    formatLocalTime(source),
+    `${pad(local.getHours())}:${pad(local.getMinutes())}:${pad(local.getSeconds())}`,
+  );
+  assert.equal(formatLocalTime(''), '00:00:00');
+  assert.equal(formatLocalTime('not-a-date'), 'not-a-date');
+});
+
+test('audit timeline components use local time formatting instead of UTC string slices', () => {
+  const auditList = readFileSync(new URL('../../src/components/features/board/AuditList.tsx', import.meta.url), 'utf8');
+  const riskControl = readFileSync(new URL('../../src/components/features/RiskControl.tsx', import.meta.url), 'utf8');
+
+  assert.match(auditList, /formatLocalTime\(audit\.timestamp\)/);
+  assert.match(riskControl, /formatLocalTime\(audit\.timestamp\)/);
+  assert.doesNotMatch(auditList, /slice\(11,\s*19\)/);
+  assert.doesNotMatch(riskControl, /slice\(11,\s*19\)/);
+});
+
+test('audit result badges translate queued accepted and blocked states', async () => {
+  const { translateAuditLog } = await loadTsModule('../../src/lib/auditTranslate.ts');
+
+  assert.equal(translateAuditLog({ event_type: 'rpa.real.requested', result: 'queued' }).displayResult, '排队中');
+  assert.equal(translateAuditLog({ event_type: 'wechat.friend.accepted', result: 'accepted' }).displayResult, '已接受');
+  assert.equal(translateAuditLog({ event_type: 'rpa.blocked.no_consent', result: 'blocked' }).displayResult, '已阻断');
+  assert.equal(translateAuditLog({ event_type: 'rpa.real.completed', result: 'completed' }).displayResult, '已完成');
+  assert.equal(translateAuditLog({ event_type: 'rpa.real.completed', result: 'business_outcome' }).displayResult, '业务结果');
+});

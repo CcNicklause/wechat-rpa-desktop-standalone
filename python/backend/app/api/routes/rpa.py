@@ -28,6 +28,15 @@ async def add_wechat(request: Request, rpa: RpaOrchestrator = Depends(get_rpa_or
     return rpa.add_wechat(payload.lead_id, payload.greeting, payload.dry_run, payload.human_approval)
 
 
+@router.get('/jobs', response_model=list[JobResponse])
+def list_jobs(
+    lead_id: str,
+    limit: int = 50,
+    rpa: RpaOrchestrator = Depends(get_rpa_orchestrator),
+):
+    return rpa.list_jobs_by_lead(lead_id, limit)
+
+
 @router.get('/jobs/{job_id}', response_model=JobResponse)
 def get_job(job_id: str, rpa: RpaOrchestrator = Depends(get_rpa_orchestrator)):
     return rpa.get_job(job_id)

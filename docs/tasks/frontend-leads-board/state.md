@@ -80,6 +80,135 @@ STATUS: CONVERGED
 
 ---
 
+## Cycle 12 - 关键日志结果状态中文化补漏
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C12-0 | 根因确认 | DONE | `auditTranslate.ts` | `displayResult` 只覆盖 success/started/approved/pending/failed，漏掉 accepted/queued/blocked 等审计 result |
+| C12-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 先断言 queued/accepted/blocked/completed/business_outcome 必须显示中文 |
+| C12-2 | 实施 | DONE | `AUDIT_RESULT_LABELS` | 保留已有翻译，未覆盖英文 result 走审计结果中文映射 |
+| C12-3 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 12 范围
+
+- 在 `auditTranslate.ts` 中补齐审计结果映射：`queued -> 排队中`、`accepted -> 已接受`、`blocked -> 已阻断`、`completed -> 已完成`、`business_outcome -> 业务结果`。
+- 保持 `success/started/approved/pending/failed` 的既有显示文案不变。
+- 关键日志 badge 不再原样露出 `accepted`、`queued` 等英文 result。
+
+### Cycle 12 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：10/10 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：13/13 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
+## Cycle 11 - 关键日志时间按本机时区显示
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C11-0 | 根因确认 | DONE | `AuditList.tsx` / `RiskControl.tsx` | 前端直接 `timestamp.slice(11, 19)`，显示的是 ISO UTC 字符串时间片 |
+| C11-1 | TDD 测试 | DONE | `scripts/tests/boardCopy.test.mjs` | 锁定 `formatLocalTime` 使用当前机器本地时区，并禁止审计组件继续切 UTC 字符串 |
+| C11-2 | 实施 | DONE | `src/lib/localTime.ts` + 组件接入 | 看板关键日志与风控审计均用本地 HH:mm:ss |
+| C11-3 | 验证 | DONE | node test / tsc / build | 前端脚本、TypeScript、构建均通过 |
+
+### Cycle 11 范围
+
+- 新增 `formatLocalTime(timestamp)`，用 `Date` 解析 ISO 时间后取当前机器本地 `HH:mm:ss`。
+- `AuditList` 的关键日志时间从 `slice(11, 19)` 改为 `formatLocalTime(audit.timestamp)`。
+- `RiskControl` 的风控审计时间同步改为本地时间格式，避免同类 UTC 展示问题。
+
+### Cycle 11 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：9/9 passed
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：12/12 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
+## Cycle 10 - 详情页执行历史与日志权威数据源修复
+
+| # | 节点 | 状态 | 产物 | 备注 |
+|---|---|---|---|---|
+| C10-0 | 根因确认 | DONE | demo.db 查询 + 代码追踪 | `rpa_jobs`/`audit_events` 有数据，但 Drawer 只依赖 localStorage 与手机号过滤 |
+| C10-1 | TDD 测试 | DONE | `test_upstream_storage.py` / `test_rpa_api.py` / `boardCopy.test.mjs` | 先验证缺少 `list_jobs_by_lead`、`GET /api/v1/rpa/jobs?lead_id=...`、lead scoped 前端接线 |
+| C10-2 | 实施 | DONE | backend rpa jobs list API + frontend hooks | 详情页打开后按 `lead_id` 补齐 job history；审计日志按 `lead_id` 查询 |
+| C10-3 | 验证 | DONE | pytest / node test / tsc / build | 后端全量、前端脚本、TypeScript、构建均通过 |
+
+### Cycle 10 范围
+
+- 新增 `SQLiteStore.list_jobs_by_lead(lead_id, limit)`，按 `updated_at DESC` 返回真实 `rpa_jobs` 历史并还原 `steps_json`。
+- 新增 `GET /api/v1/rpa/jobs?lead_id=...&limit=50`，让看板详情页不再只依赖浏览器 localStorage 的 `lead -> job` 缓存。
+- 新增 `useLeadJobHistoryQuery(leadId)`，拉取后逐条写入现有 `useLeadJobsStore.setSnapshot`，复用原有历史、步骤、raw 展示链路。
+- 新增 `useLeadAuditLogsQuery(leadId)`，详情页过程日志优先走 `GET /api/v1/audit?lead_id=...&limit=200`；全局审计列表仅作为兜底。
+- `useLeadAudits` 支持 `lead_id` 精确匹配，避免同手机号多线索或 `phone_masked` 缺失导致日志空白/串线。
+
+### Cycle 10 验证
+
+```powershell
+cd python; $env:PYTHONPATH='.'; uv run pytest backend/app/tests/test_upstream_storage.py::test_list_jobs_by_lead_returns_newest_first_with_steps backend/app/tests/test_rpa_api.py::test_list_jobs_route_returns_jobs_for_lead -q
+```
+结果：2 passed, 4 warnings
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：7/7 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+```powershell
+cd python; $env:PYTHONPATH='.'; uv run pytest backend/app/tests -q
+```
+结果：119 passed, 4 warnings
+
+```powershell
+node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
+```
+结果：10/10 passed
+
+```powershell
+pnpm -s build
+```
+结果：构建通过
+
+---
+
 ## Cycle 9 · 节点状态（KPI「执行中」口径收窄）
 
 | # | 节点 | 状态 | 产物 | 备注 |

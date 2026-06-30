@@ -178,6 +178,9 @@ class RpaOrchestrator:
             raise not_found('RPA 任务不存在')
         return job
 
+    def list_jobs_by_lead(self, lead_id: str, limit: int = 50) -> list[dict]:
+        return self.store.list_jobs_by_lead(lead_id, limit=limit)
+
     def _run_job(self, job_id: str) -> None:
         job = self.store.get_job(job_id)
         if not job:

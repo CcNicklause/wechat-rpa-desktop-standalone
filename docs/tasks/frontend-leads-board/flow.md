@@ -602,3 +602,98 @@ node --test scripts/tests/leadDisplay.test.mjs scripts/tests/boardCopy.test.mjs
 pnpm build
 ```
 结果：✅ TypeScript + Vite 构建通过
+
+---
+
+## Cycle 10 - 详情页历史与日志权威数据源
+
+### 根因
+
+- `执行历史` 之前只读取 `useLeadJobsStore.leadToJobs/jobMeta`，该 store 持久化在浏览器 localStorage。数据库 `rpa_jobs` 中有历史 job 时，如果当前浏览器没有缓存映射，详情页仍会显示空历史。
+- `执行步骤` 依赖当前选中的 `job_id`。当历史为空时无法选中 job，即使 `rpa_jobs.steps_json` 有步骤也不会显示。
+- `关键日志` 之前从全局 `/api/v1/audit` 最近 100 条里按 `phone_masked` 过滤；当日志超出 100 条、`phone_masked` 不匹配、或同手机号多线索时，数据库 `audit_events` 中存在的日志不会稳定显示。
+
+### 实际落地
+
+**后端**
+- `SQLiteStore.list_jobs_by_lead(lead_id, limit)`：按 `updated_at DESC` 查询 `rpa_jobs`，并把 `steps_json` 还原为 `steps`。
+- `RpaOrchestrator.list_jobs_by_lead()`：透传 store 查询。
+- `GET /api/v1/rpa/jobs?lead_id=<id>&limit=50`：返回该线索真实历史 job 列表，复用 `JobResponse`。
+- 既有 `GET /api/v1/audit?lead_id=<id>&limit=200` 继续作为 lead scoped 审计日志接口。
+
+**前端**
+- `useLeadJobHistoryQuery(leadId)`：详情页打开时按 `lead_id` 拉取后端 job history，并逐条调用 `useLeadJobsStore.setSnapshot()`。
+- 因为复用现有 store，`LeadJobsPanel`、`LeadStepsPanel`、`LeadRawPanel` 的展示链路保持不变；localStorage 只作为缓存，不再是历史权威来源。
+- `useLeadAuditLogsQuery(leadId)`：详情页过程日志优先按 `lead_id` 请求 `/api/v1/audit?lead_id=...&limit=200`。
+- `useLeadAudits(audits, phone, leadId)`：过滤时优先匹配 `lead_id`，再兜底匹配 `phone_masked`。
+
+### 现在的语义
+
+| 区域 | 数据来源 | 语义 |
+|---|---|---|
+| 历史 | `GET /api/v1/rpa/jobs?lead_id=...` -> `useLeadJobsStore` | 当前线索真实产生过的 RPA job 列表 |
+| 执行步骤 | 当前 job 的 `steps`，来自 history hydration / `GET /api/v1/rpa/jobs/{job_id}` / SSE | 当前选中 job 的步骤流 |
+| 关键日志 | `GET /api/v1/audit?lead_id=...&limit=200` | 当前线索的审计事件 |
+| localStorage | `wechat_rpa_lead_jobs` | 缓存与即时体验，不再作为数据库历史的唯一来源 |
+
+### Cycle 10 验证
+
+```powershell
+cd python; $env:PYTHONPATH='.'; uv run pytest backend/app/tests/test_upstream_storage.py::test_list_jobs_by_lead_returns_newest_first_with_steps backend/app/tests/test_rpa_api.py::test_list_jobs_route_returns_jobs_for_lead -q
+```
+结果：2 passed, 4 warnings
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：7/7 passed
+
+```powershell
+npx tsc --noEmit -p .
+```
+结果：无报错
+
+---
+
+## Cycle 11 - 关键日志时间按本机时区显示
+
+### 根因
+
+- `AuditList` 和 `RiskControl` 之前直接使用 `audit.timestamp.slice(11, 19)`。
+- 后端审计时间是 ISO-8601 with timezone，例如 `2026-06-29T11:47:52.822153+00:00`；直接切字符串会显示 UTC 的 `11:47:52`，不会结合当前机器时区。
+
+### 实际落地
+
+- 新增 `src/lib/localTime.ts` 的 `formatLocalTime(timestamp)`。
+- 该函数通过 `new Date(timestamp)` 解析带 timezone 的 ISO 时间，再用当前机器时区的 `getHours/getMinutes/getSeconds` 输出 `HH:mm:ss`。
+- 解析失败时原样返回，空值显示 `00:00:00`。
+- 看板关键日志 `AuditList` 与风控审计 `RiskControl` 均改为使用 `formatLocalTime(audit.timestamp)`。
+
+### Cycle 11 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：9/9 passed
+
+---
+
+## Cycle 12 - 关键日志结果状态中文化补漏
+
+### 根因
+
+- `AuditList` 的状态 badge 使用 `translateAuditLog(audit).displayResult`。
+- `auditTranslate.ts` 之前只显式覆盖 `success/started/approved/pending/failed`，数据库审计里常见的 `queued/accepted/blocked/completed/business_outcome` 会原样显示英文。
+
+### 实际落地
+
+- 在 `auditTranslate.ts` 增加 `AUDIT_RESULT_LABELS`。
+- 已有显式翻译保持不变；如果 `displayResult` 仍等于原始英文 result，则使用 `AUDIT_RESULT_LABELS[audit.result]` 兜底。
+- 关键日志中 `queued` 显示为 `排队中`，`accepted` 显示为 `已接受`，`blocked` 显示为 `已阻断`。
+
+### Cycle 12 验证
+
+```powershell
+node --test scripts/tests/boardCopy.test.mjs
+```
+结果：10/10 passed

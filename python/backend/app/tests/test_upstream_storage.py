@@ -214,3 +214,23 @@ def test_create_job_if_lead_idle_allows_different_leads(tmp_path):
     store.create_job_if_lead_idle(_make_job("job_b", "lead_2"), busy)
     assert store.get_job("job_a") is not None
     assert store.get_job("job_b") is not None
+
+
+def test_list_jobs_by_lead_returns_newest_first_with_steps(tmp_path):
+    store = _make_store(tmp_path)
+    older = _make_job("job_old", "lead_1", status="FAILED")
+    older["steps"] = ["STEP_1"]
+    older["updated_at"] = "2026-06-28T00:00:00+00:00"
+    newer = _make_job("job_new", "lead_1", status="REAL_COMPLETED")
+    newer["steps"] = ["STEP_1", "STEP_2"]
+    newer["updated_at"] = "2026-06-28T00:02:00+00:00"
+    other = _make_job("job_other", "lead_2")
+
+    store.create_job(older)
+    store.create_job(newer)
+    store.create_job(other)
+
+    jobs = store.list_jobs_by_lead("lead_1", limit=10)
+
+    assert [job["job_id"] for job in jobs] == ["job_new", "job_old"]
+    assert jobs[0]["steps"] == ["STEP_1", "STEP_2"]

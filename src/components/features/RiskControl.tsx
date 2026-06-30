@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { requestLocalApi } from '@/lib/api';
 import { useToast } from '@/hooks/useToast';
 import { AuditLog } from '@/hooks/useAudits';
+import { formatLocalTime } from '@/lib/localTime';
 
 interface RiskControlProps {
   audits: AuditLog[];
@@ -128,7 +129,7 @@ export function RiskControl({ audits }: RiskControlProps) {
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                   <span className="font-mono text-rose-500">
-                    {audit.timestamp ? audit.timestamp.slice(11, 19) : '00:00:00'}
+                    {formatLocalTime(audit.timestamp)}
                   </span>
                   <Badge variant="destructive">blocked</Badge>
                 </div>
