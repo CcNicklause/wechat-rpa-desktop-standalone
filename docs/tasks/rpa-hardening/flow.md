@@ -532,3 +532,69 @@ uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_fr
 - ✅ "微信内部布局决定加号相对位置" + 0.35 绝对阈值 → 偏左布局误杀
 
 STATUS: READY_FOR_REVIEW（链路拆解·加号定位）
+
+
+## 2026-06-30 · 菜单"添加朋友"偏移兜底多 DPI 适配 + 点完校验（链路拆解·菜单项）
+
+### 链路还原
+
+`_open_add_friends_entry` 第二步([wechat_rpa.py:971](../../../python/backend/app/services/wechat_rpa.py#L971))：
+- 主路径：`vision.click_first(["menu_add_friends","add_friends_menu_item"])` 模板/缓存匹配菜单项
+- 兜底：模板失败 → 加号位置正下方 +86px 盲点
+
+### 现象
+
+audit 实证 2/2 真实 job 主路径 `cache_menu_add_friends.png score=1.000` 命中，+86 偏移 0/2 触发（死兜底）。
+但 +86 是绝对像素，多 DPI 下不准。
+
+### 根因（1.0 / 1.25 双 DPI 真机实测）
+
+实测"添加朋友"菜单项相对加号的 y 偏移：
+
+| DPI | 加号 center_y | 菜单项 center_y | 真偏移 | 86×dpi_scale |
+|---|---|---|---|---|
+| 1.0 | 180 | 266 | **86** | 86 |
+| 1.25 | 184 | 289 | **105** | 107.5 |
+
+原 +86 是 1.0 DPI 下的真实值（作者当年在 1.0 下量的）。菜单浮层由微信按当前 DPI 渲染，偏移等比缩放：
+`偏移 = 86 × dpi_scale`。原硬编码在高 DPI 下偏小（1.25 差 19px、1.5 差 43px），会点到上方"发起群聊"。
+
+### 已落地（A + B）
+
+[wechat_rpa.py:979-1011](../../../python/backend/app/services/wechat_rpa.py#L979)：
+
+**A. 偏移按 DPI 缩放**：
+```python
+dpi_scale = get_ocr_adapter().get_dpi_scale(WindowHandle(native_id=wx_window.native_id))
+offset_px = max(20, round(86 * dpi_scale))
+fallback_y = min(match.center_y + offset_px, bottom - 20)
+```
+- `max(20, ...)` 防异常 DPI 回退时 0 偏移点到加号自身
+- `min(..., bottom-20)` 防越出窗口底部
+
+**B. 点完校验**：
+```python
+_sleep(0.8)
+if _find_add_friends_window_fast() is None:
+    raise AppError("ADD_FRIENDS_MENU_OFFSET_MISS", ...)
+```
+偏移点击后用现成的 `_find_add_friends_window_fast()`（0s 即时探测）确认"添加朋友"窗口弹出。点偏（如点到"发起群聊"）不再静默继续、下游归因错位，而是抛明确错误。
+
+### 验证
+
+新增 `TestAddFriendsMenuOffset` 6 用例（[test_vision_locator.py](../../../python/backend/app/tests/test_vision_locator.py)）：
+- 1.0/1.25/1.5 DPI 偏移分别 = 86/108/129（锁死多 DPI 回归）
+- 偏移 clamp 到窗口底部
+- DPI 异常回退时偏移 ≥20
+- 校验失败抛 `ADD_FRIENDS_MENU_OFFSET_MISS`，不静默继续
+
+```
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 80 passed（原 74 + 新 6），零回归
+```
+
+### 顺带发现（留作下一拆解点）
+
+1.0 DPI 实测时 cached_vision 又 MISS（改 0.18 后仍 MISS），原因是 **1.0 DPI 下无缓存目录**（`templates_cache/` 只有 `1920x1080_1.25_*`），且原始 `wechat_add_button.png` 模板在 1.0 渲染下未匹配。这是 cached_vision 冷启动 + 多 DPI 模板缺失问题，留待下一环节深挖。
+
+STATUS: READY_FOR_REVIEW（链路拆解·菜单项）

@@ -929,6 +929,96 @@ class TestCachedAddButtonGeometry(unittest.TestCase):
         self.assertIsNone(result, "OCR 命中应被拒绝")
 
 
+class TestAddFriendsMenuOffset(unittest.TestCase):
+    """菜单"添加朋友"偏移兜底：+86 → 86*dpi_scale（多 DPI 适配）+ 点完校验。
+
+    实测：1.0 DPI 下"添加朋友"距加号 86px，1.25 DPI 下 105px ≈ 86×1.25。
+    原硬编码 +86 只在 1.0 准确，高 DPI 下偏小会点到上方菜单项。
+    """
+
+    def _run_offset(self, dpi_scale, verify_found, add_plus_center=(606, 184)):
+        """模拟模板匹配菜单项失败 → 走偏移兜底。返回 (clicked_coords, raised, marks)。"""
+        from backend.app.services import wechat_rpa
+        from backend.app.services.vision_locator import MatchResult
+        from backend.app.core.errors import AppError
+
+        add_plus_match = MatchResult(
+            template_name="cache_wechat_add_button.png",
+            center_x=add_plus_center[0], center_y=add_plus_center[1], score=1.0,
+        )
+        clicked = []
+        marks = []
+
+        mock_desktop = MagicMock()
+        # wx_window rect: left=254 top=113 w=1118 h=809 (job 真实)
+        mock_desktop.get_bounding_rectangle.return_value = (254, 113, 1372, 922)
+        mock_desktop.click.side_effect = lambda x, y: clicked.append((x, y))
+
+        mock_ocr = MagicMock()
+        mock_ocr.get_dpi_scale.return_value = dpi_scale
+
+        raised = None
+        with patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop), \
+             patch('backend.app.services.wechat_rpa.get_ocr_adapter', return_value=mock_ocr), \
+             patch('backend.app.services.wechat_rpa._find_add_friends_window_fast', return_value=verify_found), \
+             patch('backend.app.services.wechat_rpa._click_wechat_add_button_by_cached_vision', return_value=add_plus_match), \
+             patch('backend.app.services.wechat_rpa._click_wechat_add_button_by_search_anchor'), \
+             patch('backend.app.services.wechat_rpa._sleep'):
+            # click_first 抛 AppError → 触发偏移兜底
+            mock_vision.click_first.side_effect = AppError("VISION_TARGET_NOT_FOUND", "菜单项未匹配")
+            try:
+                wechat_rpa._open_add_friends_entry(None, MagicMock(), marks.append)
+            except AppError as e:
+                raised = e
+        return clicked, raised, marks
+
+    def test_offset_scales_with_dpi_1_0(self):
+        """1.0 DPI 下偏移 = 86。"""
+        clicked, raised, marks = self._run_offset(1.0, verify_found=MagicMock())
+        self.assertIsNone(raised)
+        # 加号 center_y=184 + 86 = 270
+        self.assertEqual(clicked[-1], (606, 270))
+        self.assertTrue(any("ADD_FRIENDS_MENU_OFFSET_VERIFIED" in m for m in marks))
+
+    def test_offset_scales_with_dpi_1_25(self):
+        """1.25 DPI 下偏移 = round(86*1.25)=108（实测真值 105，误差取整可接受）。"""
+        clicked, raised, _ = self._run_offset(1.25, verify_found=MagicMock())
+        self.assertIsNone(raised)
+        # 184 + 108 = 292（实测真菜单项 289，差 3px 在菜单项高度内）
+        self.assertEqual(clicked[-1], (606, 292))
+
+    def test_offset_scales_with_dpi_1_5(self):
+        """1.5 DPI 下偏移 = round(86*1.5)=129。原 +86 会偏小 43px，改后正确。"""
+        clicked, raised, _ = self._run_offset(1.5, verify_found=MagicMock())
+        self.assertIsNone(raised)
+        self.assertEqual(clicked[-1], (606, 184 + 129))
+
+    def test_offset_clamped_to_bottom(self):
+        """偏移不超出窗口底部（bottom-20）。"""
+        # 加号 center_y 故意设很大，逼近底部
+        clicked, raised, _ = self._run_offset(1.5, verify_found=MagicMock(), add_plus_center=(606, 800))
+        self.assertIsNone(raised)
+        # bottom=922, bottom-20=902，902 < 800+129=929 → clamp 到 902
+        self.assertEqual(clicked[-1][1], 902)
+
+    def test_verify_failure_raises(self):
+        """偏移点击后未检测到"添加朋友"窗口 → 抛 ADD_FRIENDS_MENU_OFFSET_MISS，不静默继续。"""
+        clicked, raised, marks = self._run_offset(1.0, verify_found=None)
+        self.assertIsNotNone(raised, "校验失败应抛错而非静默继续")
+        self.assertEqual(raised.detail.get("code"), "ADD_FRIENDS_MENU_OFFSET_MISS")
+        self.assertTrue(any("ADD_FRIENDS_PAGE_OPENED_BY_MENU_OFFSET" in m for m in marks))
+        self.assertFalse(any("ADD_FRIENDS_MENU_OFFSET_VERIFIED" in m for m in marks))
+
+    def test_offset_floor_when_dpi_unknown(self):
+        """DPI 读取异常时回退 1.0，偏移仍 ≥20（防 0 偏移点到加号自身）。"""
+        # dpi_scale=0.0 模拟异常回退（实际代码 try/except 回退 1.0，这里测 max(20,...) 兜底）
+        clicked, raised, _ = self._run_offset(0.0, verify_found=MagicMock())
+        self.assertIsNone(raised)
+        # max(20, round(86*0))=max(20,0)=20 → 184+20=204
+        self.assertEqual(clicked[-1], (606, 204))
+
+
 if __name__ == '__main__':
     unittest.main()
 

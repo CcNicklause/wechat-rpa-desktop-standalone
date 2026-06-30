@@ -977,18 +977,40 @@ def _open_add_friends_entry(
         )
         mark(f"ADD_FRIENDS_PAGE_OPENED_BY_VISION: 模板={menu_match.template_name} score={menu_match.score:.3f}")
     except AppError:
+        # 兜底：模板/缓存都没命中菜单项时，按加号位置正下方偏移点击。
+        # 偏移量随 DPI 等比缩放（实测：1.0 DPI 下"添加朋友"距加号 86px，
+        # 1.25 DPI 下 105px ≈ 86×1.25；菜单浮层由微信按当前 DPI 渲染）。
+        # 原硬编码 +86 只在 1.0 下准确，高 DPI 下偏小会点到上方菜单项。
+        try:
+            dpi_scale = get_ocr_adapter().get_dpi_scale(
+                WindowHandle(native_id=wx_window.native_id)
+            )
+        except Exception:
+            dpi_scale = 1.0
+        offset_px = max(20, round(86 * dpi_scale))
         desktop = get_desktop_adapter()
         try:
             _left, _top, _right, bottom = desktop.get_bounding_rectangle(wx_window)
-            fallback_y = min(match.center_y + 86, bottom - 20)
+            fallback_y = min(match.center_y + offset_px, bottom - 20)
         except Exception:
-            fallback_y = match.center_y + 86
+            fallback_y = match.center_y + offset_px
         fallback_x = match.center_x
         desktop.click(fallback_x, fallback_y)
         mark(
             "ADD_FRIENDS_PAGE_OPENED_BY_MENU_OFFSET: "
-            f"已按加号菜单固定偏移点击“添加朋友” x={fallback_x} y={fallback_y}"
+            f"已按加号菜单偏移点击“添加朋友” x={fallback_x} y={fallback_y} "
+            f"offset={offset_px}(dpi={dpi_scale})"
         )
+        # 点完校验：确认"添加朋友"窗口确实弹出，避免点偏（如点到"发起群聊"）
+        # 后静默继续、下游归因错位。校验失败抛明确错误。
+        _sleep(0.8)
+        if _find_add_friends_window_fast() is None:
+            raise AppError(
+                "ADD_FRIENDS_MENU_OFFSET_MISS",
+                f"按偏移 {offset_px}px 点击后未检测到“添加朋友”窗口，"
+                "可能菜单项顺序/间距与预期不符（微信版本/分辨率差异）",
+            )
+        mark("ADD_FRIENDS_MENU_OFFSET_VERIFIED: 偏移点击已确认进入添加朋友页")
     _sleep(0.8)
 
 
