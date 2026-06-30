@@ -706,6 +706,123 @@ class TestVisionLocatorPendingCache(unittest.TestCase):
             
         self.assertEqual(len(locator.pending_cache), 0)
 
+    def test_record_match_for_cache_appends_and_commits(self):
+        """search_anchor 命中补写：record_match_for_cache 把命中截图加入 pending_cache，
+        commit_cache 落盘到 {res}_{dpi}_{theme}/ 目录。闭合自学习链路。"""
+        from pathlib import Path
+        from backend.app.services.vision_locator import VisionLocator
+
+        class FakeGray:
+            """轻量灰度图替身（测试环境 numpy 已被全局 mock，无法用真数组切片）。"""
+            def __init__(self, h, w):
+                self.shape = (h, w)
+            def __getitem__(self, sl):
+                # 返回一个带 size 的 fake cropped
+                rows = sl[0]
+                cols = sl[1]
+                fh = (rows.stop if rows.stop is not None else self.shape[0]) - (rows.start if rows.start is not None else 0)
+                fw = (cols.stop if cols.stop is not None else self.shape[1]) - (cols.start if cols.start is not None else 0)
+                cropped = MagicMock()
+                cropped.size = max(0, fh) * max(0, fw)
+                cropped.shape = (max(0, fh), max(0, fw))
+                return cropped
+
+        locator = VisionLocator()
+        locator.clear_pending_cache()
+        gray = FakeGray(200, 200)
+
+        locator.record_match_for_cache(
+            gray_source=gray,
+            x=100, y=50, w=30, h=30,
+            clean_name="wechat_add_button",
+            dpi_scale=1.0,
+            theme="light",
+            resolution=(1920, 1080),
+        )
+        self.assertEqual(len(locator.pending_cache), 1)
+        cache_file, img = locator.pending_cache[0]
+        # 文件名 + 目录命名规则（分辨率_DPI_主题）
+        self.assertEqual(cache_file.name, "wechat_add_button.png")
+        self.assertIn("1920x1080_1.0_light", str(cache_file))
+        # 截图带 ±5px padding → (30+10) x (30+10)
+        self.assertEqual(img.shape, (40, 40))
+
+        # commit 落盘
+        with patch('cv2.imwrite') as mock_imwrite, patch.object(Path, 'mkdir'):
+            locator.commit_cache()
+        mock_imwrite.assert_called_once()
+        self.assertEqual(str(mock_imwrite.call_args[0][0]), str(cache_file))
+        self.assertEqual(len(locator.pending_cache), 0)
+
+    def test_record_match_for_cache_invalid_rect_skips(self):
+        """越界/空截图不写 pending_cache（防脏数据）。"""
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        from backend.app.services.vision_locator import VisionLocator
+
+        class FakeGray:
+            def __init__(self, h, w):
+                self.shape = (h, w)
+            def __getitem__(self, sl):
+                rows = sl[0]; cols = sl[1]
+                fh = (rows.stop if rows.stop is not None else self.shape[0]) - (rows.start if rows.start is not None else 0)
+                fw = (cols.stop if cols.stop is not None else self.shape[1]) - (cols.start if cols.start is not None else 0)
+                cropped = MagicMock()
+                cropped.size = max(0, fh) * max(0, fw)
+                return cropped
+
+        locator = VisionLocator()
+        locator.clear_pending_cache()
+        gray = FakeGray(10, 10)
+        # 坐标完全越界 → cropped.size == 0
+        locator.record_match_for_cache(
+            gray_source=gray,
+            x=100, y=100, w=30, h=30,
+            clean_name="wechat_add_button",
+            dpi_scale=1.0, theme="light", resolution=(1920, 1080),
+        )
+        self.assertEqual(len(locator.pending_cache), 0)
+
+    def test_ocr_track_does_not_pollute_pending_cache(self):
+        """修复1：OCR 轨命中（含短关键词误命中）不写 pending_cache，避免错误位置污染缓存。
+
+        模拟 1.0 DPI 下"添加"误命中聊天区中部场景：OCR 轨返回 ocr_ 命中，
+        但 pending_cache 必须保持空（自学习只接受模板轨样本）。
+        """
+        import numpy as np
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        from backend.app.services.vision_locator import VisionLocator, OCR_INTENT_MAP
+        from backend.app.services.platform import OcrWord, WindowHandle, SystemContext
+
+        locator = VisionLocator()
+        locator.clear_pending_cache()
+
+        # mock ocr：返回一个含"添加"的误命中词块（模拟聊天区中部）
+        mock_ocr = MagicMock()
+        mock_ocr.recognize.return_value = [OcrWord(text="添加", x=400, y=300, width=40, height=20)]
+
+        gray = np.zeros((646, 892), dtype=np.uint8)
+        ctx = SystemContext(resolution=(1920, 1080), dpi_scale=1.0, is_dark_mode=False, language="zh-CN")
+
+        result = locator._try_ocr_track(
+            cv2=MagicMock(),
+            ocr=mock_ocr,
+            handle=WindowHandle(native_id=0),
+            source_bgr=gray,
+            gray_source=gray,
+            cache_sub_dir=Path("backend/data/templates_cache/1920x1080_1.0_light"),
+            template_names=["wechat_add_button"],
+            left=29, top=124, width=892, height=646,
+            context=ctx,
+        )
+        # OCR 轨命中了"添加"
+        self.assertIsNotNone(result)
+        self.assertTrue(result.template_name.startswith("ocr_"))
+        # 关键断言：pending_cache 不被污染
+        self.assertEqual(len(locator.pending_cache), 0,
+                         "OCR 命中不得写入 pending_cache，否则误命中位置会被落盘成正式缓存")
+
 
 class TestFuzzyTextHit(unittest.TestCase):
     """fuzzy_text_hit 的单元测试，重点覆盖 partial_ratio 短文本假阳性。"""

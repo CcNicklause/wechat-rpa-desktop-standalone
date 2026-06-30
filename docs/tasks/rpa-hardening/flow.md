@@ -598,3 +598,87 @@ uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_fr
 1.0 DPI 实测时 cached_vision 又 MISS（改 0.18 后仍 MISS），原因是 **1.0 DPI 下无缓存目录**（`templates_cache/` 只有 `1920x1080_1.25_*`），且原始 `wechat_add_button.png` 模板在 1.0 渲染下未匹配。这是 cached_vision 冷启动 + 多 DPI 模板缺失问题，留待下一环节深挖。
 
 STATUS: READY_FOR_REVIEW（链路拆解·菜单项）
+
+
+## 2026-06-30 · 自学习缓存链路两处断裂修复（链路拆解·缓存机制）
+
+> 用户点出关键：整条链路应有"何时截图、何时落库"的统一机制——关键点截图留存，
+> 整个加微结束、流程没问题才落库。审视后发现两处断裂。
+
+### 机制现状（正确部分）
+
+[wechat_rpa.py:1506-1510](../../../python/backend/app/services/wechat_rpa.py#L1506) `finally`：
+- `success=True` → `vision.commit_cache()` 把 pending_cache 落盘
+- 失败 → `vision.clear_pending_cache()` 丢弃
+即"流程成功才落库"的设计正确。
+
+### 断裂 1 · Track2 OCR 命中写 pending_cache，污染正式缓存
+
+**现象**：`find_first` 内部三轨顺序为 Track1 缓存 → Track2 OCR → Track3 模板。
+Track2 OCR 用关键词（含短词"添加"）在全窗口匹配，命中后[写 pending_cache](../../../python/backend/app/services/vision_locator.py#L788)，
+文件名是无前缀的 `{clean_name}.png`（与 Track3 模板轨同名）。
+
+**实测**（1.0 DPI）：Track2 OCR 用"添加"误命中聊天区中部 y=344（非顶部加号 y=180），
+若流程后续成功 commit，这块**错误位置的截图会被落盘成 `wechat_add_button.png` 缓存**。
+下次 Track1 缓存轨匹配到这块错图 → 点到 y=344 → 把偶发误判固化成永久错误。
+
+**修复**：删除 Track2 OCR 两处（第一轮 + 二值化第二轮）的 `pending_cache.append`
+（[vision_locator.py:784](../../../python/backend/app/services/vision_locator.py#L784)、
+[二值化轨](../../../python/backend/app/services/vision_locator.py#L829)）。
+OCR 命中是低可信度（cached_vision 都拒绝它），不作为自学习样本。自学习只接受
+Track3 模板轨（图像证据强）的命中样本。
+
+### 断裂 2 · search_anchor 命中不写 pending_cache，自学习链路不闭合
+
+**现象**：`_click_wechat_add_button_by_search_anchor` 命中加号后只 `click`+`return`，
+不写 pending_cache（它不走 `find_first`，绕过了自学习写入）。
+
+**后果**：1.0 DPI 下 cached_vision 被 OCR 挡住 MISS（见断裂1）→ 降级 search_anchor 命中加号
+→ 但不写缓存 → 1.0 缓存目录永远建不起来（实测 `templates_cache/` 只有 1.25 目录无 1.0）
+→ 1.0 永远走慢路径。自学习链路在 cached_vision MISS 的所有场景下都断裂。
+
+**修复**：
+1. 新增 `VisionLocator.record_match_for_cache(gray_source, x, y, w, h, clean_name, dpi_scale, theme, resolution)`
+   （[vision_locator.py:324](../../../python/backend/app/services/vision_locator.py#L324)）：
+   封装"裁图（±5px padding）+ 构造 cache_sub_dir（{res}_{dpi}_{theme}）+ append pending_cache"。
+2. search_anchor 命中加号后调用它（[wechat_rpa.py:905](../../../python/backend/app/services/wechat_rpa.py#L905)），
+   把加号真位置截图加入 pending_cache，等流程成功落盘，闭合自学习链路。
+
+### 真机验证（1.0 DPI）
+
+```
+search_anchor 命中加号 center=(332,180) template=wechat_add_button-tight.png score=0.978
+pending_cache 条目数: 1
+  -> .../templates_cache/1920x1080_1.0_light/wechat_add_button-tight.png  img.shape=(52,56)
+```
+1.0 DPI 下 search_anchor 命中后 pending_cache 写入了 1.0_light 目录的加号样本。
+流程成功 commit 后该文件落盘 → 下次 1.0 冷启动 cached_vision Track1 缓存轨可命中 → 走快路径。
+
+### 单测
+
+新增 `TestVisionLocatorPendingCache` 3 用例（[test_vision_locator.py](../../../python/backend/app/tests/test_vision_locator.py)）：
+- `test_record_match_for_cache_appends_and_commits`：写入 + commit 落盘到正确 {res}_{dpi}_{theme} 目录
+- `test_record_match_for_cache_invalid_rect_skips`：越界/空截图不写
+- `test_ocr_track_does_not_pollute_pending_cache`：OCR 误命中"添加"返回 ocr_ 命中，但 pending_cache 保持空
+
+```
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 83 passed（原 80 + 新 3），零回归
+```
+
+### 修复后 1.0 DPI 自学习链路（闭合）
+
+```
+首次冷启动：cached_vision MISS（暂仍被 OCR 抢占，见下"遗留"）
+  → search_anchor 命中加号 → 写 pending_cache（修复2）→ 流程成功 → commit 落 1.0 缓存
+二次冷启动：cached_vision Track1 命中 1.0 缓存 → 走快路径 → 不再依赖 search_anchor
+```
+
+### 遗留（下一拆解点）
+
+修复1/2 闭合了"自学习写入"链路，但 **cached_vision 首次冷启动仍 MISS**——因为 `find_first`
+三轨顺序里 Track2 OCR 仍抢在 Track3 模板前返回（OCR 命中虽不再写缓存，但仍会返回 ocr_ 结果
+被 cached_vision 拒绝）。根因待解：是否让 cached_vision 跳过 Track2 OCR（`skip_ocr` 参数），
+或调整三轨顺序让模板优先于 OCR。这是 cached_vision 主路径在冷启动/无缓存场景下的命中率问题。
+
+STATUS: READY_FOR_REVIEW（链路拆解·缓存机制）

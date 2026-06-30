@@ -901,6 +901,28 @@ def _click_wechat_add_button_by_search_anchor(
     center_y = top + roi_top + match["y"] + match["th"] // 2
     _mark(f"ADD_PLUS_TEMPLATE_HIT: template={template_name} score={match['score']:.3f} center=({center_x},{center_y})")
     desktop.click(center_x, center_y)
+
+    # 自学习补写：search_anchor 不走 find_first，原本命中加号后不写 pending_cache，
+    # 导致该 DPI/主题下 cached_vision 永远走慢路径、缓存目录建不起来。
+    # 这里把命中位置截图加入 pending_cache，等流程成功后落盘，闭合自学习链路。
+    try:
+        clean_name = template_name[:-4] if template_name.lower().endswith(".png") else template_name
+        import pyautogui as _pg
+        screen_res = _pg.size()
+        vision.record_match_for_cache(
+            gray_source,
+            roi_left + match["x"],
+            roi_top + match["y"],
+            match["tw"],
+            match["th"],
+            clean_name,
+            base_scale,
+            theme,
+            (screen_res[0], screen_res[1]),
+        )
+    except Exception:
+        pass
+
     return MatchResult(
         template_name=template_name,
         center_x=center_x,

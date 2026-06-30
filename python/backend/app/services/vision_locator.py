@@ -321,6 +321,54 @@ class VisionLocator:
         """清空未提交的挂起缓存。"""
         self.pending_cache.clear()
 
+    def record_match_for_cache(
+        self,
+        gray_source: Any,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        clean_name: str,
+        dpi_scale: float,
+        theme: str,
+        resolution: Tuple[int, int],
+    ) -> None:
+        """把一次"图像证据强"的命中截图加入 pending_cache，等流程成功后落盘。
+
+        供非 find_first 路径（如 search_anchor 兜底命中加号）补写自学习样本：
+        这些路径不在 find_first 内部，原本不会写 pending_cache，导致 cached_vision
+        在该 DPI/主题下永远走慢路径、缓存目录永远建不起来。本方法让它们也能贡献
+        缓存样本，使自学习链路在所有路径下都闭环。
+
+        只接受模板/几何定位（图像证据强）的命中，不用于 OCR 命中（避免误命中污染）。
+
+        Args:
+            gray_source: 整窗口灰度图（命中坐标基于此图的像素系）。
+            x, y, w, h: 命中区域在 gray_source 内的像素坐标（左上角 + 宽高）。
+            clean_name: 模板名（无扩展名），如 "wechat_add_button"。
+            dpi_scale: 当前 DPI 缩放。
+            theme: "light" / "dark"。
+            resolution: 屏幕分辨率 (w, h)。
+        """
+        try:
+            pad = 5
+            py1 = max(0, y - pad)
+            py2 = min(gray_source.shape[0], y + h + pad)
+            px1 = max(0, x - pad)
+            px2 = min(gray_source.shape[1], x + w + pad)
+            cropped = gray_source[py1:py2, px1:px2]
+            if not hasattr(cropped, "size") or int(cropped.size) <= 0:
+                return
+            theme_tag = "dark" if theme == "dark" else "light"
+            cache_sub_dir = (
+                self.cache_dir
+                / f"{resolution[0]}x{resolution[1]}_{dpi_scale}_{theme_tag}"
+            )
+            cache_file = cache_sub_dir / f"{clean_name}.png"
+            self.pending_cache.append((cache_file, cropped))
+        except Exception:
+            pass
+
     def clean_cache_by_name(self, clean_name: str) -> None:
         """删除所有分辨率子目录下的特定缓存文件，实现坏缓存的清理自愈。"""
         import os
@@ -784,22 +832,12 @@ class VisionLocator:
                 cx = left + item.x + item.width // 2
                 cy = top + item.y + item.height // 2
 
-                # 自学习：直接写入缓存（由外层 commit_cache 在成功完成工作流后安全提交）
-                cache_file = cache_sub_dir / f"{clean_name}.png"
-                pad = 5
-                py1 = max(0, item.y - pad)
-                py2 = min(height, item.y + item.height + pad)
-                px1 = max(0, item.x - pad)
-                px2 = min(width, item.x + item.width + pad)
-                cropped = gray_source[py1:py2, px1:px2]
-                is_valid = True
-                if hasattr(cropped, 'size'):
-                    try:
-                        is_valid = int(cropped.size) > 0
-                    except (TypeError, ValueError):
-                        pass
-                if is_valid:
-                    self.pending_cache.append((cache_file, cropped))
+                # OCR 命中不写入 pending_cache 自学习样本。
+                # 原因：OCR 用关键词（含"添加"等短词）在全窗口匹配，极易误命中非目标元素
+                # （实测 1.0 DPI 下"添加"误命中聊天区中部 y=344，而非顶部加号 y=180）。
+                # 若把误命中位置的截图落盘成 {clean_name}.png 缓存，下次 Track1 缓存轨会
+                # 匹配到这块错图 → 点到错误位置，把偶发误判固化成永久错误。
+                # 自学习只接受 Track3 模板轨（图像证据强）的命中样本。
 
                 return MatchResult(
                     template_name=f"ocr_{clean_name}.png",
@@ -838,22 +876,7 @@ class VisionLocator:
                         cx = left + item.x + item.width // 2
                         cy = top + item.y + item.height // 2
 
-                        # 自学习：直接写入缓存（由外层 commit_cache 在成功完成工作流后安全提交）
-                        cache_file = cache_sub_dir / f"{clean_name}.png"
-                        pad = 5
-                        py1 = max(0, item.y - pad)
-                        py2 = min(height, item.y + item.height + pad)
-                        px1 = max(0, item.x - pad)
-                        px2 = min(width, item.x + item.width + pad)
-                        cropped = gray_source[py1:py2, px1:px2]
-                        is_valid = True
-                        if hasattr(cropped, 'size'):
-                            try:
-                                is_valid = int(cropped.size) > 0
-                            except (TypeError, ValueError):
-                                pass
-                        if is_valid:
-                            self.pending_cache.append((cache_file, cropped))
+                        # OCR 二值化轨同样不写 pending_cache（同上轮理由：避免误命中污染缓存）。
 
                         return MatchResult(
                             template_name=f"ocr_{clean_name}.png",
