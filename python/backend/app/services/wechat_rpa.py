@@ -197,12 +197,12 @@ def _detect_screen_state(
         keywords = SCREEN_STATE_KEYWORDS.get(key)
         if not keywords:
             continue
-        # 整段匹配
-        if fuzzy_text_hit(full_text, keywords, min_ratio=min_ratio) is not None:
+        # 整段匹配（禁用 fuzzy，防止长文本滑窗假阳性）
+        if fuzzy_text_hit(full_text, keywords, min_ratio=min_ratio, allow_fuzzy=False) is not None:
             return key
         # 单词块匹配兜底（短词如"发消息"在整段里可能被淹没）
         for w in words:
-            if fuzzy_text_hit(w.text, keywords, min_ratio=min_ratio) is not None:
+            if fuzzy_text_hit(w.text, keywords, min_ratio=min_ratio, allow_fuzzy=True) is not None:
                 return key
     return None
 

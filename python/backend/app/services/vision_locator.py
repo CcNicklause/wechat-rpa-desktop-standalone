@@ -177,18 +177,25 @@ def _strip_spaces(s: str) -> str:
 
 
 def fuzzy_text_hit(
-    item_text: str, keywords: Sequence[str], min_ratio: int = 80
+    item_text: str, keywords: Sequence[str], min_ratio: Optional[int] = None, *, allow_fuzzy: bool = True
 ) -> Optional[str]:
     """先做空格不敏感的子串匹配；命中则原样返回 keyword。
 
-    若子串失败，再用 rapidfuzz.partial_ratio 做容错匹配
+    若子串失败且 allow_fuzzy=True，再用 rapidfuzz.partial_ratio 做容错匹配
     （应对 OCR 拼错，如 ``Add Frlends`` → ``Add Friends``）。
+
+    min_ratio: 最小相似度阈值(0-100)。
+        - None: 按关键词长度自适应(≤3字→90, ≥4字→80)
+        - 整数: 直接使用该值,不自适应
     """
     clean_text = _strip_spaces(item_text).lower()
     for kw in keywords:
         clean_kw = _strip_spaces(kw).lower()
         if clean_kw and clean_kw in clean_text:
             return kw
+
+    if not allow_fuzzy:
+        return None
 
     try:
         from rapidfuzz import fuzz
@@ -205,11 +212,22 @@ def fuzzy_text_hit(
             # 要求 OCR 文本至少达到关键词长度的 50%，才允许模糊匹配。
             if len(clean_text) < len(clean_kw) * 0.5:
                 continue
+
+            # min_ratio 按关键词长度自适应（仅当未显式传值时）
+            if min_ratio is None:
+                kw_len = len(clean_kw)
+                if kw_len <= 3:
+                    effective_ratio = 90
+                else:  # >=4 字
+                    effective_ratio = 80
+            else:
+                effective_ratio = min_ratio
+
             score = fuzz.partial_ratio(clean_kw, clean_text)
             if score > best_score:
                 best_score = score
                 best_kw = kw
-        if best_kw is not None and best_score >= min_ratio:
+        if best_kw is not None and best_score >= effective_ratio:
             return best_kw
     except ImportError:
         # rapidfuzz 未安装时仅做 substring 匹配

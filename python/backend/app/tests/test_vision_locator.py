@@ -780,6 +780,58 @@ class TestFuzzyTextHit(unittest.TestCase):
         result = self.fuzzy_text_hit("该 用 户 不 存 在", ["该用户不存在"])
         self.assertEqual(result, "该用户不存在")
 
+    # ---- allow_fuzzy 参数行为 ----
+
+    def test_allow_fuzzy_false_disables_partial_ratio(self):
+        """allow_fuzzy=False 时仅做 substring，不做 partial_ratio。"""
+        # OCR 拼错 "Add Frlends" vs 关键词 "Add Friends"
+        result = self.fuzzy_text_hit("Add Frlends", ["Add Friends"], allow_fuzzy=False)
+        self.assertIsNone(result, "allow_fuzzy=False 时拼错不应命中")
+
+    def test_allow_fuzzy_true_keeps_ocr_typo_tolerance(self):
+        """allow_fuzzy=True 时保持 OCR 拼错容错（回归）。"""
+        result = self.fuzzy_text_hit("Add Frlends", ["Add Friends"], allow_fuzzy=True)
+        self.assertEqual(result, "Add Friends")
+
+    # ---- min_ratio 自适应（仅默认值时生效）----
+
+    def test_min_ratio_adaptive_by_keyword_length(self):
+        """短关键词要求更高 min_ratio（自适应）。"""
+        # 关键词长度 2 → 自适应 min_ratio=90
+        # "搜素" vs "搜索" → partial_ratio 约 67
+        # 默认 min_ratio=None 时自适应为 90，67 < 90 不应命中
+        result = self.fuzzy_text_hit("搜素", ["搜索"])
+        self.assertIsNone(result, "短关键词应有更高相似度要求")
+
+    def test_explicit_min_ratio_overrides_adaptive(self):
+        """显式传 min_ratio 覆盖自适应。"""
+        # 显式传 min_ratio=60，即使短关键词也使用该值（"搜素"vs"搜索"实际≈67）
+        result = self.fuzzy_text_hit("搜素", ["搜索"], min_ratio=60)
+        self.assertEqual(result, "搜索", "显式传值应覆盖自适应")
+
+    # ---- full_text 假阳性回归 ----
+
+    def test_full_text_fuzzy_disabled_direct(self):
+        """直接测试 fuzzy_text_hit 在 allow_fuzzy=False 时的行为。"""
+        # 构造场景：full_text = "添加朋友"，关键词 = "添加到通讯录"
+        # 这两个有部分重叠，partial_ratio 可能给高分，但不是子串
+        result = self.fuzzy_text_hit(
+            "添加朋友",
+            ["添加到通讯录"],
+            min_ratio=80,
+            allow_fuzzy=False
+        )
+        self.assertIsNone(result, "allow_fuzzy=False 时仅子串匹配，不应命中")
+
+        # 同样场景 allow_fuzzy=True 可能命中（取决于相似度）
+        result_fuzzy = self.fuzzy_text_hit(
+            "添加朋友",
+            ["添加到通讯录"],
+            min_ratio=80,
+            allow_fuzzy=True
+        )
+        # 这里我们不断言 fuzzy 一定命中，只确认它不抛异常即可
+
 
 if __name__ == '__main__':
     unittest.main()

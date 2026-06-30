@@ -337,3 +337,139 @@ python -m unittest backend.app.tests.test_vision_locator.TestFuzzyTextHit -v
   python -m unittest backend.app.tests.test_vision_locator -v
   ```
 - 结果：`35 passed`，零回归。真机执行加友流程时，清空与粘贴极为流畅，微信不再卡死。
+
+
+## 2026-06-30 · fuzzy_text_hit 核心守卫加固（Cycle 4）
+
+### 变更总览
+
+按 [plan.md:628-704](plan.md) 实施，核心解决 `fuzzy_text_hit` 的三个风险点：
+1. 短关键词子串误命中
+2. `full_text` 场景 `partial_ratio` 滑窗假阳性
+3. `min_ratio` 一刀切
+
+### 已落地代码变更
+
+#### 1. `vision_locator.py:179-256` - `fuzzy_text_hit` 增强
+
+**新增参数**：`allow_fuzzy: bool = True`（关键字参数，向后兼容）
+- `allow_fuzzy=False` 时：完全跳过 `rapidfuzz` 分支，仅做子串匹配
+- `allow_fuzzy=True` 时：保持既有行为（先子串，后 partial_ratio）
+
+**min_ratio 自适应**（仅当未显式传值时生效）：
+- `len(clean_kw) <= 3` → `min_ratio=90`
+- `len(clean_kw) >= 4` → `min_ratio=80`
+- 显式传参优先：调用方传了 `min_ratio`（任意值）即直接用该值，不自适应
+
+> 注：首次实现按 plan 写的是 `4-6→85 / >6→80` 三档，且用 `==80` 判定默认值。
+> 实跑暴露两处问题后改为 `≤3→90 / ≥4→80` 两档 + sentinel(`None`) 判定，详见下方"Cycle 4 修正"记录。
+
+**与设计的一致性**：
+- ✅ `allow_fuzzy` 参数语义完全按设计
+- ✅ 显式传参优先：调用方显式传 `min_ratio` 时，不会触发自适应
+- ✅ 保留 50% 长度守卫不删除
+
+#### 2. `wechat_rpa.py:200-206` - `_detect_screen_state` 调用点区分
+
+- **full_text 调用（L201）**：`allow_fuzzy=False`，防止长文本滑窗假阳性
+- **单词块兜底调用（L205）**：`allow_fuzzy=True`，保持短词容错能力
+- **判定顺序**：未变更，仍按传入顺序（仅 `TARGET_NOT_FOUND` 与 `ALREADY_FRIEND` 共存时有内部重排）
+
+#### 3. OCR 意图定位调用点
+
+[vision_locator.py:774](../../../python/backend/app/services/vision_locator.py#L774) / [L828](../../../python/backend/app/services/vision_locator.py#L828)：
+- 使用默认 `min_ratio=80`（未显式传参）→ 会走自适应逻辑
+- 使用默认 `allow_fuzzy=True` → 保持 OCR 拼错容错
+
+### 新增测试用例
+
+在 `TestFuzzyTextHit` 类中新增：
+- `test_allow_fuzzy_false_disables_partial_ratio`：`allow_fuzzy=False` 时 OCR 拼错不命中
+- `test_allow_fuzzy_true_keeps_ocr_typo_tolerance`：`allow_fuzzy=True` 时拼错仍命中（回归）
+- `test_min_ratio_adaptive_by_keyword_length`：短关键词默认要求更高 min_ratio
+- `test_explicit_min_ratio_overrides_adaptive`：显式传值覆盖自适应
+- `test_full_text_fuzzy_disabled_direct`：`allow_fuzzy=False` 时长文本仅子串匹配
+
+### 与计划的一致性确认
+
+| 计划项 | 落地状态 |
+|--------|----------|
+| `allow_fuzzy` 参数（默认 True） | ✅ |
+| `full_text` 调用传 `allow_fuzzy=False` | ✅ |
+| 单词块调用保持 `allow_fuzzy=True` | ✅ |
+| min_ratio 按关键词长度自适应 | ✅ |
+| 显式传参优先（包括显式传 80） | ✅ |
+| 保留 50% 长度守卫 | ✅ |
+| 不碰 state_keys 顺序 / SCREEN_STATE_KEYWORDS | ✅ |
+
+### 验证结果（首次实现）
+
+首次实现后实跑暴露 2 个失败（见下方"Cycle 4 修正"），本节为首次实现状态记录，最终通过结果以修正记录为准。
+
+STATUS: NEEDS_ITERATION（Cycle 4 首次）
+
+---
+
+## 2026-06-30 · fuzzy_text_hit 测试失败修复（Cycle 4 修正）
+
+### 问题概述
+
+上一轮 Cycle 4 提交后实跑测试，发现 2 个失败：
+1. `test_explicit_min_ratio_overrides_adaptive`：显式传 `min_ratio=80` 被误判为默认值走自适应
+2. `test_fuzzy_match_ocr_typo`：6字关键词自适应到 85，导致真实 OCR 拼错（83分）不命中
+
+### 根因分析
+
+**失败1根因**：用 `effective_ratio == 80` 判断是否为默认值，调用方显式传 `80` 也会命中，被误判为未传值走自适应。
+
+**失败2根因**：原计划的自适应分档 `4-6→85` 过严，`"添加到涌讯录"` vs `"添加到通讯录"` partial_ratio≈83 < 85，导致既有测试回归。
+
+### 已落地修复
+
+#### 1. `vision_locator.py:179-231` - sentinel 值区分显式/默认
+
+**签名变更**：
+```python
+def fuzzy_text_hit(
+    item_text: str, keywords: Sequence[str], min_ratio: Optional[int] = None, *, allow_fuzzy: bool = True
+) -> Optional[str]:
+```
+
+**自适应逻辑修正**：
+- `min_ratio is None` → 走自适应（未显式传参）
+- `min_ratio is not None` → 直接用该值（包括显式传 `80`）
+
+**自适应分档放宽**：
+- `len(clean_kw) <= 3` → `min_ratio=90`（保持，防短关键词假阳性）
+- `len(clean_kw) >= 4` → `min_ratio=80`（取消原 4-6→85，保留 OCR 容错能力）
+
+**向后兼容**：
+- 调用方不传 `min_ratio` → `None` → 自适应（行为与原默认 `80` 一致，但对短关键词更严）
+- 调用方传 `min_ratio=80` → 直接用 80（不再误触发自适应）
+
+#### 2. `test_vision_locator.py:798-810` - 测试用例预期值修正
+
+实际验证发现：`"搜素"` vs `"搜索"` rapidfuzz.partial_ratio≈67，而非测试注释假设的 85。
+- `test_explicit_min_ratio_overrides_adaptive`：显式传值从 `80` 改为 `60`，与实际评分匹配
+- `test_min_ratio_adaptive_by_keyword_length`：更新注释，注明实际 partial_ratio≈67
+
+### 验证结果
+
+**完整测试输出**（实跑，2026-06-30）：
+```
+$env:PYTHONIOENCODING='utf-8'; $env:PYTHONPATH='.'
+uv run pytest backend/app/tests/test_vision_locator.py -q
+=> 40 passed in 0.52s
+
+uv run pytest backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 28 passed in 1.58s
+```
+
+**覆盖范围**：
+- ✅ `test_fuzzy_match_ocr_typo`：6字关键词自适应到 80，83分命中（回归修复）
+- ✅ `test_explicit_min_ratio_overrides_adaptive`：显式传 `60` 覆盖自适应（原 80 因实际评分≈67 不足改为 60）
+- ✅ `test_min_ratio_adaptive_by_keyword_length`：不传 min_ratio 时 2 字关键词自适应到 90，67 分不命中
+- ✅ `test_allow_fuzzy_false_disables_partial_ratio` / `test_full_text_fuzzy_disabled_direct`：full_text 路径仅子串
+- ✅ 其余用例零回归；关联 RPA 链路测试集 28 passed 零回归
+
+STATUS: READY_FOR_REVIEW

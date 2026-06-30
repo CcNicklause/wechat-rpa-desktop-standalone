@@ -623,3 +623,92 @@ $env:PYTHONPATH='.'; uv run pytest backend/app/tests
 剩余事项：以上优化清单均非本轮 P0/P1 功能阻塞项，可进入下一轮小步 hardening。
 
 STATUS: REVIEWED_WITH_OPTIMIZATION_LIST
+
+
+# Cycle 4 · fuzzy_text_hit 核心守卫加固
+
+## 问题背景
+
+当前 `fuzzy_text_hit` 存在三处风险：
+
+1. **短关键词子串误命中**：`"发消息"` / `"已发送"` / `"OK"` / `"添加"` 等短关键词，容易作为子串误命中长文本（如 `"添加朋友"` → 误中 `"添加"`）
+2. **full_text 场景 partial_ratio 滑窗假阳性**：`_detect_screen_state` 把整页 OCR 拼接成 `full_text`（几百字）后调用 `fuzzy_text_hit`，此时 `len(clean_text) >> len(clean_kw)`，现有 50% 长度守卫不生效，`partial_ratio` 退化为滑窗找最优局部对齐，极易假阳性
+3. **min_ratio 一刀切**：短关键词（≤3字）用 80 分阈值太低，容易误中；长关键词用 80 分合理
+
+## 设计决策
+
+### 1. substring 阶段短关键词边界约束
+
+**方案**：
+- 对 `clean_kw` 长度 ≤ 3 的短关键词，在 `full_text`（将由新参数标识）场景下仅做精确子串匹配，不做 partial_ratio
+- 在单词块（`item.text`）场景下，保持既有行为
+
+**关键阈值**：`len(clean_kw) ≤ 3` 视为短关键词
+
+### 2. full_text 场景禁用 partial_ratio
+
+**新增参数**：
+```python
+def fuzzy_text_hit(
+    item_text: str,
+    keywords: Sequence[str],
+    min_ratio: int = 80,
+    *,
+    allow_fuzzy: bool = True,  # 新增：是否允许 partial_ratio
+) -> Optional[str]:
+```
+
+**调用方修改**：
+- `_detect_screen_state` 中，`full_text` 调用 `fuzzy_text_hit(full_text, keywords, min_ratio=min_ratio, allow_fuzzy=False)`
+- `_detect_screen_state` 中，单词块兜底调用保持 `allow_fuzzy=True`
+- `VisionLocator._find_first_ocr_track` 中，`fuzzy_text_hit(item.text, keywords)` 保持 `allow_fuzzy=True`（默认）
+
+**向后兼容**：默认 `allow_fuzzy=True`，与当前行为一致，不破坏既有调用
+
+### 3. min_ratio 按关键词长度自适应
+
+**分档规则**：
+- `len(clean_kw) ≤ 3`：`min_ratio = 90`
+- `4 ≤ len(clean_kw) ≤ 6`：`min_ratio = 85`
+- `len(clean_kw) > 6`：`min_ratio = 80`
+
+**显式传参优先级**：如果调用方显式传了 `min_ratio`，则使用该值，不覆盖自适应；但 `allow_fuzzy=False` 时仍禁用 partial_ratio
+
+**调用方检查**：
+- `wechat_rpa.py` L201/L205：显式传 `min_ratio=min_ratio`（来自 `_detect_screen_state` 参数）
+- `vision_locator.py` L760/L814：使用默认 `min_ratio=80`
+
+## 代码变更清单
+
+| 文件 | 变更 |
+|------|------|
+| `vision_locator.py` | `fuzzy_text_hit` 新增 `allow_fuzzy` 参数；min_ratio 自适应逻辑 |
+| `wechat_rpa.py` | `_detect_screen_state` 中 `full_text` 调用传 `allow_fuzzy=False` |
+
+## 不在本轮范围
+
+- 各业务环节 `state_keys` 顺序重排（RISK_CONTROL 双关键词门槛、SEND_SUCCESS 顺序）
+- `SCREEN_STATE_KEYWORDS` 短关键词收紧
+- 环节 4 读屏范围收窄、probe 顺序、Y < 55px 阈值
+- OCR 意图定位的短关键词误定位（OCR_INTENT_MAP）
+
+## 测试清单
+
+### 新增单测（TestFuzzyTextHit 补充）
+
+| 用例名 | 意图 |
+|--------|------|
+| `test_allow_fuzzy_false_disables_partial_ratio` | `allow_fuzzy=False` 时即使拼错也不命中（仅子串） |
+| `test_allow_fuzzy_true_keeps_ocr_typo_tolerance` | `allow_fuzzy=True` 时仍保持 OCR 拼错容错（回归） |
+| `test_min_ratio_adaptive_by_keyword_length` | 短关键词要求更高 min_ratio |
+| `test_explicit_min_ratio_overrides_adaptive` | 显式传 min_ratio 覆盖自适应 |
+| `test_full_text_with_short_keyword_no_false_positive` | full_text 含短关键词子串但非精确匹配时不命中 |
+
+### 回归验证
+
+- 既有 `TestFuzzyTextHit` 8 个用例全过
+- 既有 `TestScreenStateDetection` 用例全过
+
+## STATUS
+
+STATUS: CONVERGED
