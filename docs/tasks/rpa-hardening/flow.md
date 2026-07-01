@@ -745,3 +745,77 @@ uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_fr
 | 6 | "通过朋友验证"窗口名硬编码中文 | 繁体/英文环境安全降级，低危 |
 
 STATUS: READY_FOR_REVIEW（链路拆解·通过朋友验证页）
+
+
+## 2026-07-01 · _click_send_verify 底部扩展多 DPI 适配 + rect 校验（整体链路 debug）
+
+> 整体 debug 加微链路（派 agent 扫描 + 自己核验）。agent 报告多次假报（SEND_SUCCESS
+> 无关键词、_fill_verify_message 75px 未缩放、优先级重排未守卫均不成立），逐条核验后
+> 真实漏洞只剩 2 个：A（发送后误报成功，留待讨论）+ B（本节修复）。
+
+### 漏洞 B · _click_send_verify 底部扩展硬编码 120px + rect 未校验
+
+[wechat_rpa.py:1195-1199](../../../python/backend/app/services/wechat_rpa.py#L1195) 原代码：
+```python
+rect = desktop.get_bounding_rectangle(target_window)
+left, top, right, bottom = rect
+extended_rect = (left, top, right, bottom + 120)
+```
+两个问题：
+1. `bottom + 120` 是 1.0 DPI 绝对像素，高 DPI 下微信验证窗底部阴影/边框遮挡的"确定"
+   按钮尺寸放大，120 不够覆盖 → 按钮被截断、模板匹配失败。
+2. `rect` 来自 `get_bounding_rectangle`，窗口刚关闭/句柄失效时可能返回 None 或短元组，
+   直接 `left, top, right, bottom = rect` 解包会抛 TypeError 中断流程。
+
+**DPI vs 分辨率**：底部扩展量覆盖的是微信 UI 元素（阴影/边框/按钮）尺寸，由 DPI 决定，
+与分辨率无关。故按 DPI 缩放，与菜单 +86 / _confirm 34 同思路。
+
+### 已落地
+
+[wechat_rpa.py:1195-1215](../../../python/backend/app/services/wechat_rpa.py#L1195)：
+```python
+rect = desktop.get_bounding_rectangle(target_window)
+if not rect or len(rect) < 4:
+    rect = target_window.rect          # 回退到窗口自带 rect
+if not rect or len(rect) < 4:
+    raise AppError("VISION_SCREENSHOT_FAILED", "验证窗 rect 无效")
+...
+dpi_scale = get_ocr_adapter().get_dpi_scale(...)
+extend_px = max(60, round(120 * dpi_scale))
+extended_rect = (left, top, right, bottom + extend_px)
+```
+- rect 有效性校验 + 回退到 target_window.rect，仍无效才抛明确错误
+- 扩展量按 DPI 缩放，`max(60, ...)` 防异常 DPI 时扩展不足
+
+### 验证
+
+新增 `TestClickSendVerifyExtend` 6 用例（[test_vision_locator.py](../../../python/backend/app/tests/test_vision_locator.py)）：
+- 1.0/1.25/1.5 DPI 下扩展量 = 120/150/180（锁死多 DPI 回归）
+- DPI 异常低时扩展 ≥60
+- left/top/right 不变（只动 bottom）
+- rect 无效时回退到 target_window.rect
+
+```
+uv run pytest backend/app/tests/test_vision_locator.py backend/app/tests/test_friend_acceptance.py backend/app/tests/test_rpa_acceptance_lifecycle.py backend/app/tests/test_risk_frozen_and_retry_precheck.py -q
+=> 94 passed（原 88 + 新 6），零回归
+```
+
+### 整体 debug 复核结论（agent 报告 vs 实际）
+
+| agent 报的项 | 核验 |
+|---|---|
+| 高危1 SEND_SUCCESS 无关键词 | ❌ 假，已定义 L130 |
+| 高危2 _fill_verify_message 75px 未缩放 | ❌ 假，已 int(75*scale) L1174 |
+| 中危3 发送后读屏范围错 | ❌ 误判，Toast 在主窗口中央是有意设计 |
+| 中危9/C 优先级重排未守卫 | ❌ 假，L192 已有守卫 |
+| **B _click_send_verify 120px + rect** | **✅ 真实，已修** |
+
+教训：subagent 报告须逐条核验代码，不轻信。本次仅 B 成立，A 留待讨论。
+
+### 遗留
+
+- **A（高）**：[L1519-1524](../../../python/backend/app/services/wechat_rpa.py#L1519) 发送后"验证窗消失推断成功"
+  （SEND_LIKELY_OK）——发送失败+窗口异常关闭也会判成功，误报已发送。需设计如何区分
+  "窗口正常关闭=成功" vs "窗口异常关闭=失败"，留待讨论。
+
+STATUS: READY_FOR_REVIEW（整体链路 debug·B）

@@ -1193,11 +1193,25 @@ def _click_send_verify(
     _sleep(0.2)
 
     # 扩展窗口边界，向下扩展，防止 DPI 缩放或边框阴影导致底部的“确定”按钮被截断。
-    # 通过创建一个 platform_data=None 且 rect 底部增加 120 像素 of WindowHandle 来绕过实时 BoundingRectangle of 限制。
+    # 通过创建一个 platform_data=None 且 rect 底部增加像素的 WindowHandle 来绕过实时 BoundingRectangle 限制。
     rect = desktop.get_bounding_rectangle(target_window)
+    if not rect or len(rect) < 4:
+        # 窗口刚关闭/句柄失效时 rect 可能无效，回退到 target_window 自带的 rect
+        rect = target_window.rect
+    if not rect or len(rect) < 4:
+        raise AppError("VISION_SCREENSHOT_FAILED", "验证窗 rect 无效，无法定位发送按钮")
     left, top, right, bottom = rect
-    extended_rect = (left, top, right, bottom + 120)
-    
+    # 底部扩展量按 DPI 缩放：阴影/边框遮挡的"确定"按钮尺寸由 DPI 决定，与分辨率无关。
+    # 原 120px 是 1.0 DPI 经验值，高 DPI 下不缩放会不够覆盖底部按钮。
+    try:
+        dpi_scale = get_ocr_adapter().get_dpi_scale(
+            WindowHandle(native_id=target_window.native_id)
+        )
+    except Exception:
+        dpi_scale = 1.0
+    extend_px = max(60, round(120 * dpi_scale))
+    extended_rect = (left, top, right, bottom + extend_px)
+
     extended_window = WindowHandle(
         native_id=target_window.native_id,
         name=target_window.name,

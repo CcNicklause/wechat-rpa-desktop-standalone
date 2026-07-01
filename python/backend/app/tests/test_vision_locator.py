@@ -1215,6 +1215,96 @@ class TestConfirmFriendProfileOffset(unittest.TestCase):
         self.assertEqual(c1[-1][0], c2[-1][0], "click_x 应为纯比例，与 DPI 无关")
 
 
+class TestClickSendVerifyExtend(unittest.TestCase):
+    """_click_send_verify 底部扩展量按 DPI 缩放 + rect 有效性校验。
+
+    原 bottom+120 是 1.0 DPI 绝对像素，高 DPI 下不够覆盖底部"确定"按钮。
+    改为 round(120*dpi_scale)，与菜单 +86 / _confirm 34 同思路。
+    """
+
+    def _run_send_verify(self, dpi_scale, bounding_rect=(100, 100, 500, 600)):
+        """模拟点发送，捕获传入 vision.click_first 的 extended_window.rect。"""
+        from backend.app.services import wechat_rpa
+        from backend.app.services.platform import WindowHandle
+        from backend.app.services.vision_locator import MatchResult
+
+        target = WindowHandle(native_id=999, rect=bounding_rect)
+        captured = {}
+
+        mock_desktop = MagicMock()
+        mock_desktop.get_bounding_rectangle.return_value = bounding_rect
+
+        mock_ocr = MagicMock()
+        mock_ocr.get_dpi_scale.return_value = dpi_scale
+
+        def fake_click_first(auto, window, names, threshold=None):
+            captured['rect'] = window.rect
+            return MatchResult(template_name="send_button.png", center_x=300, center_y=700, score=0.9)
+
+        with patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop), \
+             patch('backend.app.services.wechat_rpa.get_ocr_adapter', return_value=mock_ocr), \
+             patch('backend.app.services.wechat_rpa._sleep'):
+            mock_vision.click_first.side_effect = fake_click_first
+            wechat_rpa._click_send_verify(None, target, lambda s: None)
+        return captured.get('rect')
+
+    def test_extend_scales_with_dpi_1_0(self):
+        """1.0 DPI 下底部扩展 120。"""
+        # bounding_rect bottom=600, extended bottom = 600+120 = 720
+        ext_rect = self._run_send_verify(1.0, bounding_rect=(100, 100, 500, 600))
+        self.assertEqual(ext_rect[3], 600 + 120)
+
+    def test_extend_scales_with_dpi_1_25(self):
+        """1.25 DPI 下底部扩展 round(120*1.25)=150。原 120 在 1.25 下偏小 30px。"""
+        ext_rect = self._run_send_verify(1.25, bounding_rect=(100, 100, 500, 600))
+        self.assertEqual(ext_rect[3], 600 + 150)
+
+    def test_extend_scales_with_dpi_1_5(self):
+        """1.5 DPI 下底部扩展 round(120*1.5)=180。"""
+        ext_rect = self._run_send_verify(1.5, bounding_rect=(100, 100, 500, 600))
+        self.assertEqual(ext_rect[3], 600 + 180)
+
+    def test_extend_floor_when_dpi_low(self):
+        """DPI 异常低时扩展 ≥60（防扩展不足导致底部按钮仍被截断）。"""
+        ext_rect = self._run_send_verify(0.1, bounding_rect=(100, 100, 500, 600))
+        # max(60, round(120*0.1))=max(60,12)=60
+        self.assertEqual(ext_rect[3], 600 + 60)
+
+    def test_left_top_right_unchanged(self):
+        """扩展只动 bottom，left/top/right 不变。"""
+        ext_rect = self._run_send_verify(1.25, bounding_rect=(100, 100, 500, 600))
+        self.assertEqual(ext_rect[0], 100)
+        self.assertEqual(ext_rect[1], 100)
+        self.assertEqual(ext_rect[2], 500)
+
+    def test_invalid_rect_falls_back_to_target_rect(self):
+        """bounding_rectangle 返回无效时，回退到 target_window.rect。"""
+        from backend.app.services import wechat_rpa
+        from backend.app.services.platform import WindowHandle
+        from backend.app.services.vision_locator import MatchResult
+
+        target = WindowHandle(native_id=999, rect=(100, 100, 500, 600))
+        mock_desktop = MagicMock()
+        mock_desktop.get_bounding_rectangle.return_value = None  # 无效
+        mock_ocr = MagicMock()
+        mock_ocr.get_dpi_scale.return_value = 1.0
+        captured = {}
+
+        def fake_click_first(auto, window, names, threshold=None):
+            captured['rect'] = window.rect
+            return MatchResult(template_name="send_button.png", center_x=300, center_y=700, score=0.9)
+
+        with patch('backend.app.services.wechat_rpa.vision') as mock_vision, \
+             patch('backend.app.services.wechat_rpa.get_desktop_adapter', return_value=mock_desktop), \
+             patch('backend.app.services.wechat_rpa.get_ocr_adapter', return_value=mock_ocr), \
+             patch('backend.app.services.wechat_rpa._sleep'):
+            mock_vision.click_first.side_effect = fake_click_first
+            wechat_rpa._click_send_verify(None, target, lambda s: None)
+        # 回退到 target.rect (bottom=600) + 120 = 720
+        self.assertEqual(captured['rect'][3], 720)
+
+
 if __name__ == '__main__':
     unittest.main()
 
